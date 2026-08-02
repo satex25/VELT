@@ -1,6 +1,6 @@
 # VELT — where this project actually stands
 
-**Updated:** 2026-08-02 (session 3)
+**Updated:** 2026-08-02 (session 4)
 **Repository:** `~/Desktop/velt` — this folder is the whole project. Nothing
 lives anywhere else.
 **Phase:** Core Rust engine builds and tests green on this Mac. Toolchain
@@ -16,11 +16,15 @@ Desktop, delete it — two copies of a project is how they diverge.
 
 If you have lost the thread, this section is the answer.
 
-**What exists:** six Rust crates, 2,853 lines, 50 tests — all 50 passing on
+**What exists:** six Rust crates, 3,433 lines, 65 tests — all 65 passing on
 this machine. The money primitives, the underwriting engine, the provenance
 tracer, the Fair Housing connector boundary, the snapshot store, and an HTTP
 daemon. This is the hard half of the product and it is real code, not
 scaffolding.
+
+**`just ci` is green end to end as of session 4** — every gate, including the
+two that had never been reached. The daemon has now served a real underwrite
+over HTTP on this machine.
 
 **What does not exist:** any user interface. The Electron shell and the React
 terminal are two README files that say "not implemented." No live data source
@@ -83,17 +87,18 @@ was `aarch64-unknown-linux-gnu` and macOS `cargo` cannot use a byte of it.
 **Superseded 2026-08-02, session 3: the workspace now builds and tests green on
 this Mac.** `cargo nextest` reported *50 tests run: 50 passed, 0 skipped* across
 6 binaries, after a clean 38.69s compile under 1.97.1 / aarch64-apple-darwin.
-The Mac column below is no longer inherited.
+The Mac column below is no longer inherited. (Session 4 took the suite to 65;
+the table records the current counts, not the session-3 ones.)
 
 | Crate | Purpose | Tests | Linux container | This Mac |
 |---|---|---:|:---:|:---:|
-| `velt-money` | integer minor units, `Bps`, one rounding policy | 10 | ✅ | ✅ |
+| `velt-money` | integer minor units, `Bps`, one rounding policy | 19 | ✅ | ✅ |
 | `velt-provenance` | `Traced<T>`, trace tree, source rollup | 4 | ✅ | ✅ |
-| `velt-engine` | underwriting + fixed-point amortization | 27 | ✅ | ✅ |
+| `velt-engine` | underwriting + fixed-point amortization | 33 | ✅ | ✅ |
 | `velt-connector` | trust tiers, Fair Housing filter, rights posture | 7 | ✅ | ✅ |
 | `velt-store` | SQLite WAL, immutable snapshots, pointer flip | 2 | ✅ | ✅ |
-| `velt-daemon` | axum on loopback, utoipa OpenAPI | — | ✅ | builds |
-| | | **50** | | **50/50** |
+| `velt-daemon` | axum on loopback, utoipa OpenAPI | — | ✅ | serves |
+| | | **65** | | **65/65** |
 
 ### Independently re-verified 2026-08-02
 
@@ -117,15 +122,26 @@ Static audit of the same date: no `f64` or `f32` in any financial path, no
 | Gate | Status |
 |---|---|
 | Compiles clean, zero warnings, clippy included | ✅ **confirmed on this Mac** — `fmt-check` and `clippy -D warnings` both green |
-| Tests pass, snapshot-to-the-cent on financial paths | ✅ **50/50 on this Mac**; fixtures also independently re-verified |
+| Tests pass, snapshot-to-the-cent on financial paths | ✅ **65/65 on this Mac**; fixtures also independently re-verified |
 | External data has rights posture + trust tier | ✅ enforced by trait signature — no live connector exists yet |
 | Computed values carry provenance | ✅ the engine can only return `Traced` |
-| OpenAPI ↔ TypeScript drift check passes | ⬜ not yet reached — `deps` fails before `drift` runs |
-| It runs | ⬜ daemon compiles; not yet exercised over HTTP here |
+| OpenAPI ↔ TypeScript drift check passes | ✅ **green** — `just drift` regenerates both and reports no diff |
+| It runs | ✅ **green** — daemon served `/health` and a real `/underwrite` over loopback |
 | Committed to the repo | ⚠️ committed locally, **never pushed** |
 
-Two gates went green on this machine in session 3. Two remain unreached because
-`just ci` orders `deps` before `openapi` and `drift`, and `deps` was failing.
+**Every gate in `just ci` now passes on this machine (session 4).** The two that
+had never been reached were blocked behind `deps`, which `just ci` orders first;
+once `deps` was fixed in session 3 both turned out to pass on the first run.
+
+`/underwrite` was exercised with a $250k / 20% down / 7% / 360mo deal and checked
+by hand: NOI $19,170.00, cap rate 767bps, DSCR 1.2006, CFBT $3,202.80, annual
+debt service $15,967.20. The monthly payment behind that figure is
+$1,330.60499…, which rounds to $1,330.60 — a case where a float implementation
+would plausibly have returned $1,330.61. Every figure carries its full
+provenance tree in the response.
+
+The one gate that is *not* in `just ci`: CI also runs `cargo test --workspace
+--doc`, and the tree contains zero doctests. That step passes vacuously.
 
 ### The `cargo deny` failure and its fix
 
@@ -202,12 +218,24 @@ The raw score was the least useful part. Triage of the 28 survivors:
 | Untested sign handling in `amort::div_round_half_away` | 3 | Killed by deletion — see below |
 | Untested vacancy-rate lower bound | 2 | Tests added |
 
-The 8 equivalent ones are unkillable by construction: `numer <= 0` vs
-`numer < 0` is unreachable because `rem != 0` implies `numer != 0`;
+Two of those are unkillable by construction and remain so: `numer <= 0` vs
+`numer < 0` is unreachable because `rem != 0` implies `numer != 0`, and
 `denom <= 0` vs `denom < 0` is unreachable because `denom == 0` already
-returned; and `Currency` match arms for exponent 0/1/3 are dead because every
-supported currency has exponent 2. Chasing them would mean writing tests that
-cannot fail.
+returned. Chasing them would mean writing tests that cannot fail.
+
+**The rest of that "equivalent" classification was wrong, and session 4 corrected
+it.** Three of the eight were `Currency` match arms, filed as dead because every
+supported currency has exponent 2. That is true of the *reachability*, but it
+buried the fact that the arms were also **wrong** — the same defect recorded two
+paragraphs below as a separate finding. A mutant that survives because the
+function has a latent bug is not an equivalent mutant; it is the bug reporting
+itself. All three are now gone.
+
+The count itself does not carry over: the amort dedup removed eleven mutants, so
+session 4 works from 112 rather than 123, and the first confirming run found six
+survivors rather than eight. Three were the `Currency` defect, one was a `pow_fp`
+guard that turned out to be killable outright, and two are the genuinely
+equivalent pair.
 
 **The finding: `div_round_half_away` was implemented twice.** Identical logic in
 `velt-money/src/lib.rs` and `velt-engine/src/amort.rs`, while velt-money's copy
@@ -226,15 +254,64 @@ delegation. The three mutants are gone by deletion, not by testing.
   but nothing tested it, so nothing would have stopped a refactor removing it.
   A negative vacancy pushes the occupancy complement above 100% — effective
   gross income would exceed scheduled rent.
-- **`Currency::minor_units_per_major` has a latent wrong answer.** `3 => 1_000`
-  and `_ => 1_000` are the same value, so the catch-all also returns 1,000 for
-  exponent 4 or more — silently wrong by a factor of ten. Harmless today because
-  nothing has exponent ≠ 2; a real bug the day a currency is added. **Not yet
-  fixed.**
+- **`Currency::minor_units_per_major` had a latent wrong answer.** `3 => 1_000`
+  and `_ => 1_000` were the same value, so the catch-all also returned 1,000 for
+  exponent 4 or more — silently wrong by a factor of ten. Harmless while nothing
+  has exponent ≠ 2; a real bug the day a currency is added. **Fixed in session
+  4** — see below.
 
 Tests 50 → 60. Every new assertion was verified against each mutation before
-committing; all 22 targeted mutants are killed. **Re-run `just mutants` to
-confirm — the expected result is 8 survivors, all equivalent.**
+committing; all 22 targeted mutants are killed.
+
+### Session 4 — the mutation run confirmed, and the `Currency` fix
+
+Three runs, same 112 mutants, on this Mac:
+
+| Run | Caught | Missed | Unviable | Timeout |
+|---|---:|---:|---:|---:|
+| Confirming session 3's tests | 80 | 6 | 25 | 1 |
+| After the `Currency` fix | 82 | 3 | 26 | 1 |
+| After the `pow_fp` test | **83** | **2** | 26 | 1 |
+
+**86 viable mutants, 84 detected, and both survivors carry a one-line proof of
+equivalence** (the `numer`/`denom` pair above). 83 were caught outright; the
+84th is the `while exp > 0` guard in `pow_fp` turned into an infinite loop,
+which the suite catches on the timeout — a detection, not a hole. Session 3's
+prediction of "8 survivors, all equivalent" was close on the count and wrong on
+the reason.
+
+**The `Currency` fix closed the domain rather than patching the arm.** Changing
+`_ => 1_000` to `_ => 10_000` would have moved the wrong answer from exponent 4
+to exponent 5. The cause was that `exponent()` returned a `u32`, so a five-entry
+lookup had to map four billion inputs and therefore needed a catch-all — and a
+catch-all is a wrong answer waiting for its first caller.
+
+`exponent()` now returns a closed `Exponent` enum, `Zero`..`Four` — ISO 4217 uses
+0, 2, 3 and 4, and 1 completes the ladder rather than leaving a hole a future
+currency could fall into. The scale table is exhaustive over it, so there is no
+fallback to be wrong, and deleting an arm stops compiling instead of silently
+returning a neighbour's scale — which is why one of the three mutants came back
+`unviable` rather than `caught`. The currency-to-scale data still lives in
+exactly one place, so adding JPY or KWD remains a one-line edit.
+
+Three tests pin it, each failing independently when the old defect is
+reintroduced: the `10^digits` identity across every variant, distinctness of all
+scales (the exact property `3` and `_` violated), and the two values the old
+catch-all got wrong.
+
+**One more mutant turned out to be killable.** `pow_fp` guards its final
+squaring, whose result is never read. That guard is load-bearing at the top of
+the domain: squaring `(1+r)^256` overflows `i128` while `(1+r)^256` itself is
+fine, so dropping the guard shrinks the rate-and-term range the engine can
+underwrite. It is not observable through `monthly_payment` — the payment formula
+multiplies principal by growth and overflows on that product first for any
+realistic loan — so the test calls `pow_fp` directly.
+
+**`mutants.out/` is no longer tracked.** It is build output: a full run rewrites
+the whole directory, and tracking it made every mutation run a ~9,500-line diff
+across 130 files. It accounted for 130 of the repository's 180 tracked files and
+buried the real change in commit `f417ec6`. CI still keeps the report by
+uploading the directory as a workflow artifact.
 
 ---
 
@@ -247,11 +324,24 @@ confirm — the expected result is 8 survivors, all equivalent.**
   largest gap in the Rust half and it is invisible from the outside, because
   `/underwrite` returns a correct answer either way.
 - **`cargo deny`, `cargo machete` and `cargo mutants` have all now run**, and all
-  three found real problems. All fixed except the `Currency` exponent catch-all
-  noted above. `just mutants` needs a second run to confirm the new tests land.
+  three found real problems. **All are fixed**, including the `Currency`
+  exponent catch-all, and the mutation result is confirmed over three runs.
 - **`pnpm install` completed on 2026-08-02.** `pnpm-lock.yaml` now exists and is
-  a build input — keep it committed. `tsc` has still not typechecked the
-  generated client, because `just ci` has not yet reached the `drift` gate.
+  a build input — keep it committed. The `drift` gate now runs and passes, so
+  the generated client is regenerated and diffed on every `just ci`.
+- **There are no doctests.** CI runs `cargo test --workspace --doc` and it
+  passes over an empty set. Not a defect, but it is not evidence of anything
+  either, and the crate-level docs are good enough to be worth executing.
+- **`Display for Money` is wrong for a 0-exponent currency.** Found while
+  reviewing the `Currency` fix; same latent class, different site. `width`
+  becomes 0, so the format renders a trailing separator with no fraction
+  digits — `1234.0 JPY` where it should be `1234 JPY`. Unreachable today, and
+  deliberately **not fixed here**, because it is also untestable today: no
+  `Currency` has exponent 0, so a fix could not be proven by a test, and this
+  project does not ship unverified changes to a financial path. Fix it in the
+  same commit that adds the first non-2-exponent currency, which is the commit
+  that can test it. Note `Display` is excluded from mutation testing by
+  `exclude_re` in `.cargo/mutants.toml`, so mutants will not surface this.
 - **pnpm reports 9.12.3 → 11.18.0 available.** Do not take that upgrade
   casually: the version is pinned in `package.json` as a reproducibility
   guarantee, so bumping it is a deliberate commit, not a prompt to accept.
@@ -264,16 +354,20 @@ confirm — the expected result is 8 survivors, all equivalent.**
 
 ## Next, in order
 
-1. `just setup && just ci`. Two gates are green; drive the remaining ones green
-   before building anything new on top.
-2. `bash scripts/push-to-github.sh` — get the work off a single laptop.
-3. `just mutants` — the first mutation run on the engine. Every surviving
-   mutant is a missing test. Fix them before building anything on top.
-4. First real connector. HUD Fair Market Rent is the headline metric, so it is
+1. `bash scripts/push-to-github.sh` — get the work off a single laptop. This is
+   now the largest unmanaged risk: `just ci` is green and nothing is backed up.
+2. **Persist something.** `velt-store` is implemented, tested, and called by
+   nothing; `/underwrite` still forgets its answer the moment it responds. This
+   is the biggest gap in the Rust half and the one the outside cannot see.
+3. First real connector. HUD Fair Market Rent is the headline metric, so it is
    the obvious target. **Write the rights posture before the connector code**
    (§5).
-5. The terminal UI, against the generated client. This is where VELT stops
+4. The terminal UI, against the generated client. This is where VELT stops
    being an engine and starts being a product you can look at.
+
+`just ci` is the gate for all of the above and it currently passes; keep it that
+way. Three of the last four commits before session 4 were made with `fmt-check`
+failing, which is how a green gate quietly stops being one.
 
 ---
 

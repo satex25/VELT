@@ -51,6 +51,75 @@ pub enum MoneyError {
 /// Result alias for money arithmetic.
 pub type Result<T> = std::result::Result<T, MoneyError>;
 
+/// The number of decimal places in a currency's normal written form.
+///
+/// This is a closed enum rather than an integer, and that is the entire point.
+/// The scale of a currency is `10^exponent`, and expressing the exponent as a
+/// `u32` meant [`Exponent::minor_units_per_major`] had to map four billion
+/// inputs onto a handful of answers — which forces a catch-all arm, and a
+/// catch-all arm is a wrong answer waiting for its first caller. It had one:
+/// the arm returned 1,000 for every exponent above 3, so a 4-exponent currency
+/// would have been scaled by a factor of ten too little, silently, in every
+/// amount VELT ever computed for it.
+///
+/// With the domain closed, the mapping is total: every variant has exactly one
+/// scale, there is no fallback, and adding a variant is a compile error at each
+/// match rather than a silent default. ISO 4217 uses exponents 0 (JPY, KRW),
+/// 2 (most), 3 (KWD, BHD, JOD) and 4 (CLF, UYW); 1 completes the ladder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Exponent {
+    /// No minor unit — the major unit is indivisible (JPY, KRW).
+    Zero,
+    /// One decimal place.
+    One,
+    /// Two decimal places — cents. Every currency VELT supports today.
+    Two,
+    /// Three decimal places (KWD, BHD, JOD).
+    Three,
+    /// Four decimal places (CLF, UYW).
+    Four,
+}
+
+impl Exponent {
+    /// Every exponent, for exhaustive testing.
+    ///
+    /// Extend this when adding a variant. Forgetting to cannot make the code
+    /// wrong — [`Exponent::digits`] and [`Exponent::minor_units_per_major`]
+    /// stop compiling until the new variant is handled — it only narrows what
+    /// the property tests sweep.
+    pub const ALL: [Self; 5] = [Self::Zero, Self::One, Self::Two, Self::Three, Self::Four];
+
+    /// The exponent as a count of decimal places.
+    #[must_use]
+    pub const fn digits(self) -> u32 {
+        match self {
+            Self::Zero => 0,
+            Self::One => 1,
+            Self::Two => 2,
+            Self::Three => 3,
+            Self::Four => 4,
+        }
+    }
+
+    /// Minor units in one major unit — `10^digits`.
+    ///
+    /// Tabulated rather than computed: `i64::pow` panics on overflow and
+    /// `checked_pow` would make a currency's own scale fallible, when in fact
+    /// every value in this closed set fits `i64` comfortably. The table is
+    /// exhaustive over the enum, so it cannot fall through, and
+    /// `scale_is_always_ten_to_the_digits` pins it to the arithmetic identity.
+    #[must_use]
+    pub const fn minor_units_per_major(self) -> i64 {
+        match self {
+            Self::Zero => 1,
+            Self::One => 10,
+            Self::Two => 100,
+            Self::Three => 1_000,
+            Self::Four => 10_000,
+        }
+    }
+}
+
 /// ISO-4217 currencies VELT supports.
 ///
 /// VELT covers overseas acquisition, so currency is explicit on every amount
@@ -74,26 +143,21 @@ pub enum Currency {
 impl Currency {
     /// Number of decimal places in the currency's normal written form.
     ///
-    /// All currencies currently supported are 2-exponent; the method exists so
-    /// that adding a 0-exponent currency (JPY) or 3-exponent (KWD) is a data
-    /// change rather than an audit of every call site.
+    /// All currencies currently supported are 2-exponent. This match is the one
+    /// place the currency-to-scale data lives: adding a 0-exponent currency
+    /// (JPY) or 3-exponent (KWD) is an edit here and nowhere else, because
+    /// everything downstream derives from [`Exponent`] rather than re-deciding.
     #[must_use]
-    pub const fn exponent(self) -> u32 {
+    pub const fn exponent(self) -> Exponent {
         match self {
-            Self::Usd | Self::Eur | Self::Gbp | Self::Cad | Self::Mxn => 2,
+            Self::Usd | Self::Eur | Self::Gbp | Self::Cad | Self::Mxn => Exponent::Two,
         }
     }
 
     /// Number of minor units in one major unit (100 for a 2-exponent currency).
     #[must_use]
     pub const fn minor_units_per_major(self) -> i64 {
-        match self.exponent() {
-            0 => 1,
-            1 => 10,
-            2 => 100,
-            3 => 1_000,
-            _ => 1_000,
-        }
+        self.exponent().minor_units_per_major()
     }
 
     /// ISO-4217 alphabetic code.
@@ -351,7 +415,7 @@ impl fmt::Display for Money {
         let per = self.currency.minor_units_per_major().unsigned_abs().max(1);
         let major = abs.checked_div(per).unwrap_or(0);
         let minor = abs.checked_rem(per).unwrap_or(0);
-        let width = usize::try_from(self.currency.exponent()).unwrap_or(2);
+        let width = usize::try_from(self.currency.exponent().digits()).unwrap_or(2);
         write!(
             f,
             "{sign}{major}.{minor:0width$} {}",
@@ -528,6 +592,70 @@ mod tests {
     #[test]
     fn from_major_scales_to_minor_units() {
         assert_eq!(Money::from_major(1_500, USD).unwrap().minor(), 150_000);
+    }
+
+    #[test]
+    fn scale_is_always_ten_to_the_digits() {
+        // `digits` and `minor_units_per_major` are two independent tables. This
+        // is the arithmetic identity that binds them: a variant whose scale
+        // disagrees with its digit count fails here rather than in a balance
+        // sheet. Exhaustive, because the domain is closed and small.
+        for e in Exponent::ALL {
+            let expected = 10_i64.checked_pow(e.digits()).unwrap();
+            assert_eq!(
+                e.minor_units_per_major(),
+                expected,
+                "{e:?} claims {} digits but scales by {}",
+                e.digits(),
+                e.minor_units_per_major()
+            );
+        }
+    }
+
+    #[test]
+    fn no_two_exponents_share_a_scale() {
+        // This is the defect the `Exponent` type replaced. The old lookup had
+        // `3 => 1_000` and `_ => 1_000`, so every exponent above 3 was scaled
+        // as if it were 3 — a silent factor-of-ten error for a 4-exponent
+        // currency such as CLF. Distinct exponents must have distinct scales;
+        // a collision is a table typo, and the old code had one.
+        for (i, a) in Exponent::ALL.iter().enumerate() {
+            for (j, b) in Exponent::ALL.iter().enumerate() {
+                if i != j {
+                    assert_ne!(
+                        a.minor_units_per_major(),
+                        b.minor_units_per_major(),
+                        "{a:?} and {b:?} share a scale"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_exponents_the_old_catch_all_got_wrong_are_pinned() {
+        // 10_000 is the value the old `_ => 1_000` arm returned as 1_000.
+        assert_eq!(Exponent::Four.minor_units_per_major(), 10_000);
+        // A 0-exponent currency has no minor unit at all; scaling it by 1_000
+        // would have inflated every JPY amount by three orders of magnitude.
+        assert_eq!(Exponent::Zero.minor_units_per_major(), 1);
+    }
+
+    #[test]
+    fn every_supported_currency_is_two_exponent() {
+        // Pins the currency-to-scale data itself. `exponent` is the single
+        // place that data lives, so this is the assertion that has to change
+        // when a non-decimal currency is added — deliberately.
+        for c in [
+            Currency::Usd,
+            Currency::Eur,
+            Currency::Gbp,
+            Currency::Cad,
+            Currency::Mxn,
+        ] {
+            assert_eq!(c.exponent(), Exponent::Two, "{c} is not 2-exponent");
+            assert_eq!(c.minor_units_per_major(), 100, "{c} does not scale by 100");
+        }
     }
 
     #[test]

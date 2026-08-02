@@ -255,6 +255,38 @@ mod tests {
         assert_eq!(payment, usd(79_079), "got {payment}");
     }
 
+    /// `pow_fp` must stop squaring the moment the exponent is exhausted.
+    ///
+    /// Binary exponentiation squares the base once per bit. The final squaring
+    /// is guarded, because its result would never be read — and at the top of
+    /// the supported domain that guard is what keeps the function in range:
+    /// squaring `(1 + r)^256` here exceeds `i128` even though `(1 + r)^256`
+    /// itself is fine. Drop the guard and this returns `Overflow` instead of an
+    /// answer, shrinking the rate-and-term domain the engine can underwrite.
+    ///
+    /// Tested against `pow_fp` directly rather than through `monthly_payment`,
+    /// because the payment formula multiplies principal by growth and overflows
+    /// on that product first for any realistic loan size — the headroom this
+    /// protects is not observable from outside the module.
+    #[test]
+    fn pow_fp_does_not_square_past_the_last_needed_power() {
+        // 1.066666666666 in fixed point — a 6.67%/month rate. Chosen so that
+        // (1+r)^256 lands just under the i128 ceiling and its square lands over.
+        let base = SCALE + 66_666_666_666;
+        let top = pow_fp(base, 256).expect("the last needed power must be reachable");
+
+        // Pin the premise. Without this the case can rot into a tautology: any
+        // later change to SCALE or to the base leaves `is_ok` passing while the
+        // input quietly drifts away from the ceiling, and the test stops
+        // constraining the guard it was written for. This is the squaring the
+        // loop must not perform.
+        assert!(
+            mul_fp(top, top).is_err(),
+            "premise lost: one more squaring no longer overflows, so this case \
+             no longer pins the guard — recalibrate `base`"
+        );
+    }
+
     #[test]
     fn zero_rate_is_straight_line_not_a_division_by_zero() {
         let payment = monthly_payment(usd(1_200_000), Bps::ZERO, 12).unwrap();
