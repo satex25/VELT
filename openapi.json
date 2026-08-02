@@ -1,0 +1,429 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "VELT daemon",
+    "description": "Local-first underwriting API. Loopback only.",
+    "license": {
+      "name": "UNLICENSED",
+      "identifier": "UNLICENSED"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [],
+        "summary": "Liveness probe.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Daemon is serving",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/underwrite": {
+      "post": {
+        "tags": [],
+        "summary": "Run an underwrite.",
+        "operationId": "post_underwrite",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnderwriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Underwrite complete",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Underwrite"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Input rejected by the engine",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiError": {
+        "type": "object",
+        "description": "Error body returned for a rejected underwrite.",
+        "required": [
+          "code",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Machine-readable error code."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Human-readable detail."
+          }
+        }
+      },
+      "Bps": {
+        "type": "integer",
+        "format": "int64",
+        "description": "A rate in basis points scaled by [`Bps::SCALE`] (1 bp = 1/100 of a percent).\n\nRates are integers for the same reason money is: an interest rate that\ndrifts by a float ULP produces a payment schedule that is wrong by dollars\nover 30 years."
+      },
+      "Currency": {
+        "type": "string",
+        "description": "ISO-4217 currencies VELT supports.\n\nVELT covers overseas acquisition, so currency is explicit on every amount\nand mixing currencies is a hard error rather than an implicit conversion.",
+        "enum": [
+          "USD",
+          "EUR",
+          "GBP",
+          "CAD",
+          "MXN"
+        ]
+      },
+      "DealInputs": {
+        "type": "object",
+        "description": "Acquisition and financing terms.",
+        "required": [
+          "purchase_price",
+          "closing_costs",
+          "rehab_budget",
+          "down_payment_rate",
+          "interest_rate",
+          "term_months"
+        ],
+        "properties": {
+          "closing_costs": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Closing costs paid at acquisition."
+          },
+          "down_payment_rate": {
+            "$ref": "#/components/schemas/Bps",
+            "description": "Down payment, as a rate on purchase price."
+          },
+          "interest_rate": {
+            "$ref": "#/components/schemas/Bps",
+            "description": "Annual nominal interest rate."
+          },
+          "purchase_price": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Contract purchase price."
+          },
+          "rehab_budget": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Rehab or capital improvement budget funded at acquisition."
+          },
+          "term_months": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Amortization term in months.",
+            "minimum": 0
+          }
+        }
+      },
+      "ExpenseInputs": {
+        "type": "object",
+        "description": "The operating expense assumptions for a property.\n\nRate-based expenses are applied to effective gross income, not to gross\npotential rent — you do not pay a management fee on rent you did not collect.",
+        "required": [
+          "annual_property_tax",
+          "annual_insurance",
+          "annual_hoa",
+          "annual_utilities",
+          "annual_other_fixed",
+          "management_rate",
+          "maintenance_rate",
+          "capex_reserve_rate"
+        ],
+        "properties": {
+          "annual_hoa": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Annual HOA or condo fees."
+          },
+          "annual_insurance": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Annual hazard and liability insurance."
+          },
+          "annual_other_fixed": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Other fixed annual operating costs."
+          },
+          "annual_property_tax": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Annual property tax."
+          },
+          "annual_utilities": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Annual owner-paid utilities."
+          },
+          "capex_reserve_rate": {
+            "$ref": "#/components/schemas/Bps",
+            "description": "Capital reserves, as a rate on EGI."
+          },
+          "maintenance_rate": {
+            "$ref": "#/components/schemas/Bps",
+            "description": "Repairs and maintenance, as a rate on EGI."
+          },
+          "management_rate": {
+            "$ref": "#/components/schemas/Bps",
+            "description": "Property management fee, as a rate on EGI."
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "description": "Liveness and version response.",
+        "required": [
+          "status",
+          "engine_version"
+        ],
+        "properties": {
+          "engine_version": {
+            "type": "string",
+            "description": "Engine version, used by the shell to detect a stale sidecar."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `\"ok\"` when the daemon is serving."
+          }
+        }
+      },
+      "IncomeInputs": {
+        "type": "object",
+        "description": "The rent roll and income assumptions for a property.",
+        "required": [
+          "monthly_scheduled_rent",
+          "other_annual_income",
+          "vacancy_rate"
+        ],
+        "properties": {
+          "monthly_scheduled_rent": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Monthly scheduled rent across all units.\n\nFor a voucher-eligible underwrite this is the HUD Fair Market Rent for\nthe unit mix, which is why FMR is the headline metric: it is the input\nthe entire income side hangs from."
+          },
+          "other_annual_income": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Annual income from sources other than rent (laundry, parking, storage)."
+          },
+          "vacancy_rate": {
+            "$ref": "#/components/schemas/Bps",
+            "description": "Economic vacancy, as a rate. Includes physical vacancy plus credit loss."
+          }
+        }
+      },
+      "Money": {
+        "type": "object",
+        "description": "A monetary amount, stored as signed integer minor units.\n\n`Money` is deliberately not `Add`/`Sub`/`Mul`: every operation is fallible\n(currency mismatch, overflow) and the doctrine forbids silently-wrong money.\nUse [`Money::add`], [`Money::sub`], [`Money::mul_int`], [`Money::apply`].",
+        "required": [
+          "minor",
+          "currency"
+        ],
+        "properties": {
+          "currency": {
+            "$ref": "#/components/schemas/Currency",
+            "description": "Currency of this amount."
+          },
+          "minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Signed amount in minor units (cents for USD)."
+          }
+        }
+      },
+      "Traced_Bps": {
+        "type": "object",
+        "description": "A value carrying the trace that produced it.\n\nThe engine's public API is expressed entirely in `Traced<T>`, which makes\n\"compute a number without provenance\" unrepresentable rather than merely\ndiscouraged.",
+        "required": [
+          "value",
+          "trace"
+        ],
+        "properties": {
+          "trace": {
+            "$ref": "#/components/schemas/Trace",
+            "description": "The derivation of the value."
+          },
+          "value": {
+            "type": "integer",
+            "format": "int64",
+            "description": "A rate in basis points scaled by [`Bps::SCALE`] (1 bp = 1/100 of a percent).\n\nRates are integers for the same reason money is: an interest rate that\ndrifts by a float ULP produces a payment schedule that is wrong by dollars\nover 30 years."
+          }
+        }
+      },
+      "Traced_Money": {
+        "type": "object",
+        "description": "A value carrying the trace that produced it.\n\nThe engine's public API is expressed entirely in `Traced<T>`, which makes\n\"compute a number without provenance\" unrepresentable rather than merely\ndiscouraged.",
+        "required": [
+          "value",
+          "trace"
+        ],
+        "properties": {
+          "trace": {
+            "$ref": "#/components/schemas/Trace",
+            "description": "The derivation of the value."
+          },
+          "value": {
+            "type": "object",
+            "description": "A monetary amount, stored as signed integer minor units.\n\n`Money` is deliberately not `Add`/`Sub`/`Mul`: every operation is fallible\n(currency mismatch, overflow) and the doctrine forbids silently-wrong money.\nUse [`Money::add`], [`Money::sub`], [`Money::mul_int`], [`Money::apply`].",
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "properties": {
+              "currency": {
+                "$ref": "#/components/schemas/Currency",
+                "description": "Currency of this amount."
+              },
+              "minor": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Signed amount in minor units (cents for USD)."
+              }
+            }
+          }
+        }
+      },
+      "Underwrite": {
+        "type": "object",
+        "description": "A completed underwrite. Every field carries its derivation.",
+        "required": [
+          "gross_potential_rent",
+          "vacancy_loss",
+          "effective_gross_income",
+          "operating_expenses",
+          "net_operating_income",
+          "annual_debt_service",
+          "cash_flow_before_tax",
+          "total_cash_invested",
+          "loan_amount",
+          "cap_rate",
+          "dscr",
+          "cash_on_cash",
+          "expense_ratio",
+          "gross_rent_multiplier",
+          "break_even_occupancy"
+        ],
+        "properties": {
+          "annual_debt_service": {
+            "$ref": "#/components/schemas/Traced_Money",
+            "description": "Annual debt service."
+          },
+          "break_even_occupancy": {
+            "$ref": "#/components/schemas/Traced_Bps",
+            "description": "Break-even occupancy: the occupancy at which CFBT reaches zero."
+          },
+          "cap_rate": {
+            "$ref": "#/components/schemas/Traced_Bps",
+            "description": "Going-in capitalization rate: NOI / purchase price."
+          },
+          "cash_flow_before_tax": {
+            "$ref": "#/components/schemas/Traced_Money",
+            "description": "Cash flow before tax (annual)."
+          },
+          "cash_on_cash": {
+            "$ref": "#/components/schemas/Traced_Bps",
+            "description": "Cash-on-cash return: CFBT / total cash invested."
+          },
+          "dscr": {
+            "$ref": "#/components/schemas/Traced_Bps",
+            "description": "Debt service coverage ratio, in basis points (12_500 == 1.25x)."
+          },
+          "effective_gross_income": {
+            "$ref": "#/components/schemas/Traced_Money",
+            "description": "Effective gross income (annual)."
+          },
+          "expense_ratio": {
+            "$ref": "#/components/schemas/Traced_Bps",
+            "description": "Operating expense ratio: OpEx / EGI."
+          },
+          "gross_potential_rent": {
+            "$ref": "#/components/schemas/Traced_Money",
+            "description": "Gross potential rent (annual)."
+          },
+          "gross_rent_multiplier": {
+            "$ref": "#/components/schemas/Traced_Bps",
+            "description": "Gross rent multiplier, in basis points (price / GPR)."
+          },
+          "loan_amount": {
+            "$ref": "#/components/schemas/Traced_Money",
+            "description": "Loan principal."
+          },
+          "net_operating_income": {
+            "$ref": "#/components/schemas/Traced_Money",
+            "description": "Net operating income (annual)."
+          },
+          "operating_expenses": {
+            "$ref": "#/components/schemas/Traced_Money",
+            "description": "Total operating expenses (annual)."
+          },
+          "total_cash_invested": {
+            "$ref": "#/components/schemas/Traced_Money",
+            "description": "Total cash required to close."
+          },
+          "vacancy_loss": {
+            "$ref": "#/components/schemas/Traced_Money",
+            "description": "Vacancy and credit loss (annual)."
+          }
+        }
+      },
+      "UnderwriteInputs": {
+        "type": "object",
+        "description": "The full input set for an underwrite.",
+        "required": [
+          "income",
+          "expenses",
+          "deal"
+        ],
+        "properties": {
+          "deal": {
+            "$ref": "#/components/schemas/DealInputs",
+            "description": "Acquisition and debt."
+          },
+          "expenses": {
+            "$ref": "#/components/schemas/ExpenseInputs",
+            "description": "Expense side."
+          },
+          "income": {
+            "$ref": "#/components/schemas/IncomeInputs",
+            "description": "Income side."
+          }
+        }
+      },
+      "UnderwriteRequest": {
+        "type": "object",
+        "description": "Request body for an underwrite.",
+        "required": [
+          "inputs"
+        ],
+        "properties": {
+          "inputs": {
+            "$ref": "#/components/schemas/UnderwriteInputs",
+            "description": "The full input set."
+          }
+        }
+      }
+    }
+  }
+}

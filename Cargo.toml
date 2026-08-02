@@ -1,0 +1,69 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/velt-money",
+    "crates/velt-provenance",
+    "crates/velt-engine",
+    "crates/velt-connector",
+    "crates/velt-store",
+    "crates/velt-daemon",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+velt-money       = { path = "crates/velt-money" }
+velt-provenance  = { path = "crates/velt-provenance" }
+velt-engine      = { path = "crates/velt-engine" }
+velt-connector   = { path = "crates/velt-connector" }
+velt-store       = { path = "crates/velt-store" }
+
+serde       = { version = "1.0.229", features = ["derive"] }
+serde_json  = "1.0.151"
+thiserror   = "2.0.19"
+utoipa      = { version = "5.5.0", features = ["axum_extras", "chrono", "uuid"] }
+chrono      = { version = "0.4.45", features = ["serde"] }
+uuid        = { version = "1.24.0", features = ["v4", "serde"] }
+axum        = "0.8.9"
+tokio       = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+tower-http  = { version = "0.7.0", features = ["trace", "cors"] }
+tracing     = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+anyhow      = "1.0.104"
+rusqlite    = { version = "0.40.1", features = ["bundled", "chrono", "uuid"] }
+insta       = { version = "1.48.0", features = ["json", "redactions"] }
+proptest    = "1.11.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+# HARD CONSTRAINT (doctrine §5): money is integer minor units. f64 is banned in
+# financial paths. `float_arithmetic` is denied workspace-wide; the engine and
+# money crates additionally forbid the float types outright via
+# `disallowed_types` in clippy.toml.
+float_arithmetic  = "deny"
+lossy_float_literal = "deny"
+as_conversions    = "deny"
+cast_possible_truncation = "deny"
+cast_precision_loss = "deny"
+cast_sign_loss    = "deny"
+arithmetic_side_effects = "deny"
+unwrap_used       = "deny"
+expect_used       = "warn"
+panic             = "deny"
+indexing_slicing  = "deny"
+todo              = "deny"
+unimplemented     = "deny"
+dbg_macro         = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

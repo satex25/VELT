@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  gate:
+    name: doctrine gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - run: pnpm install --frozen-lockfile
+
+      # Doctrine §9 — Definition of Done, enforced.
+      - name: Format
+        run: just fmt-check
+
+      # The f64 ban, the pure-engine rule, and the panic ban are all clippy
+      # gates. This step is why they are constraints and not conventions.
+      - name: Lint (f64 ban, purity, panic ban)
+        run: just lint
+
+      - name: Tests (snapshot-to-the-cent on financial paths)
+        run: just test
+
+      # Doctrine §7 — blocking gate.
+      - name: OpenAPI ↔ TypeScript drift
+        run: just drift

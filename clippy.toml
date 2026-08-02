@@ -1,0 +1,17 @@
+# VELT doctrine §5 — enforced, not conventional.
+# f64/f32 may not appear in any financial path. These types are disallowed
+# outright; a violation is a compile-time clippy error, not a review comment.
+disallowed-types = [
+    { path = "f64", reason = "doctrine §5: money is integer minor units. Use velt_money::Money (i64 minor units) or Bps (i32 basis points)." },
+    { path = "f32", reason = "doctrine §5: money is integer minor units. Use velt_money::Money (i64 minor units) or Bps (i32 basis points)." },
+]
+
+disallowed-methods = [
+    { path = "std::time::SystemTime::now", reason = "doctrine §5: the computation engine is pure — no clock. Inject time at the connector boundary as a FetchedAt." },
+    { path = "chrono::Utc::now", reason = "doctrine §5: the computation engine is pure — no clock. Inject time at the connector boundary as a FetchedAt." },
+]
+
+avoid-breaking-exported-api = false
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

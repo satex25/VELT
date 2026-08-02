@@ -1,0 +1,7 @@
+{
+  "name": "@velt/terminal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@velt/api-client": "workspace:*" }
+}
