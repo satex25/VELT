@@ -48,9 +48,15 @@ jobs:
         with:
           tool: cargo-nextest,cargo-deny,cargo-machete
 
+      # No `version:` here on purpose. package.json pins
+      # `packageManager: pnpm@9.12.3` as a reproducibility guarantee, and
+      # pnpm/action-setup reads that field when no version is given. Stating a
+      # version here as well made the two disagree — the action refuses a
+      # conflicting pair and failed the job before a single gate ran. Even had
+      # it resolved, pnpm 10 against a lockfile written by 9.12.3 would have
+      # broken `--frozen-lockfile`. package.json is the single source of truth;
+      # bump it there and CI follows.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - uses: actions/setup-node@v5
         with:
