@@ -346,6 +346,9 @@ mod tests {
 
     #[test]
     fn rounding_rejects_a_zero_divisor_rather_than_panicking() {
-        assert!(matches!(div_round_half_away(1, 0), Err(MoneyError::DivideByZero { .. })));
+        assert!(matches!(
+            div_round_half_away(1, 0),
+            Err(MoneyError::DivideByZero { .. })
+        ));
     }
 }

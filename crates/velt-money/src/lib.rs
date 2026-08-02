@@ -497,8 +497,12 @@ pub fn div_round_half_away(numer: i128, denom: i128, op: &'static str) -> Result
     }
     // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,
     // and doctrine §5 does not permit a financial path that can panic.
-    let quot = numer.checked_div(denom).ok_or(MoneyError::Overflow { op })?;
-    let rem = numer.checked_rem(denom).ok_or(MoneyError::Overflow { op })?;
+    let quot = numer
+        .checked_div(denom)
+        .ok_or(MoneyError::Overflow { op })?;
+    let rem = numer
+        .checked_rem(denom)
+        .ok_or(MoneyError::Overflow { op })?;
     if rem == 0 {
         return Ok(quot);
     }
@@ -662,6 +666,9 @@ mod tests {
             Bps::from_raw(1_200).div_int(0),
             Err(MoneyError::DivideByZero { op: "Bps::div_int" })
         );
-        assert_eq!(Bps::from_raw(1_200).div_int(12).unwrap(), Bps::from_raw(100));
+        assert_eq!(
+            Bps::from_raw(1_200).div_int(12).unwrap(),
+            Bps::from_raw(100)
+        );
     }
 }
