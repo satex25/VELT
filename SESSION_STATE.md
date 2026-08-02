@@ -187,6 +187,55 @@ The other five, with the design reason each removal is safe:
 Verified before removal: zero references to any of the six anywhere under
 `crates/*/src`, including test modules and derive attributes.
 
+### Mutation testing — first run, and what it found
+
+`just mutants` ran for the first time on 2026-08-02: **123 mutants, 69 caught,
+28 missed, 25 unviable, 1 timeout.** 70% of viable mutants caught.
+
+The raw score was the least useful part. Triage of the 28 survivors:
+
+| Class | Count | Action |
+|---|---:|---|
+| Provably equivalent — no test can kill them | 8 | Documented, not chased |
+| Untested predicates (`is_zero`, `is_negative`, `Bps::is_positive`) | 13 | Tests added |
+| Untested divide-by-zero guards (`Money::div_int`, `Bps::div_int`) | 2 | Tests added |
+| Untested sign handling in `amort::div_round_half_away` | 3 | Killed by deletion — see below |
+| Untested vacancy-rate lower bound | 2 | Tests added |
+
+The 8 equivalent ones are unkillable by construction: `numer <= 0` vs
+`numer < 0` is unreachable because `rem != 0` implies `numer != 0`;
+`denom <= 0` vs `denom < 0` is unreachable because `denom == 0` already
+returned; and `Currency` match arms for exponent 0/1/3 are dead because every
+supported currency has exponent 2. Chasing them would mean writing tests that
+cannot fail.
+
+**The finding: `div_round_half_away` was implemented twice.** Identical logic in
+`velt-money/src/lib.rs` and `velt-engine/src/amort.rs`, while velt-money's copy
+carried the doc comment *"The one rounding primitive in VELT."* That was false.
+velt-money's copy had sign tests; amort's had none — which is exactly why three
+mutants survived in one twin and zero in the other.
+
+Doctrine §5 wants rounding applied once so a change is a one-line diff. It was a
+two-crate edit that could silently diverge. Fixed by making velt-money's version
+`pub` with an `op` label and reducing amort's 26-line copy to a 3-line
+delegation. The three mutants are gone by deletion, not by testing.
+
+**Two other real defects surfaced:**
+
+- **A negative vacancy rate was unproven.** The guard existed and was correct,
+  but nothing tested it, so nothing would have stopped a refactor removing it.
+  A negative vacancy pushes the occupancy complement above 100% — effective
+  gross income would exceed scheduled rent.
+- **`Currency::minor_units_per_major` has a latent wrong answer.** `3 => 1_000`
+  and `_ => 1_000` are the same value, so the catch-all also returns 1,000 for
+  exponent 4 or more — silently wrong by a factor of ten. Harmless today because
+  nothing has exponent ≠ 2; a real bug the day a currency is added. **Not yet
+  fixed.**
+
+Tests 50 → 60. Every new assertion was verified against each mutation before
+committing; all 22 targeted mutants are killed. **Re-run `just mutants` to
+confirm — the expected result is 8 survivors, all equivalent.**
+
 ---
 
 ## Not done — declared, not disguised
@@ -197,9 +246,9 @@ Verified before removal: zero references to any of the six anywhere under
 - **Nothing is persisted.** See "The daemon does not persist" above. This is the
   largest gap in the Rust half and it is invisible from the outside, because
   `/underwrite` returns a correct answer either way.
-- **`cargo deny` and `cargo machete` have now both run and both found real
-  problems**, since fixed. **`cargo mutants` still has not** — it is a separate
-  recipe and has never been executed anywhere.
+- **`cargo deny`, `cargo machete` and `cargo mutants` have all now run**, and all
+  three found real problems. All fixed except the `Currency` exponent catch-all
+  noted above. `just mutants` needs a second run to confirm the new tests land.
 - **`pnpm install` completed on 2026-08-02.** `pnpm-lock.yaml` now exists and is
   a build input — keep it committed. `tsc` has still not typechecked the
   generated client, because `just ci` has not yet reached the `drift` gate.
