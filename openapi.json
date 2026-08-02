@@ -4,8 +4,8 @@
     "title": "VELT daemon",
     "description": "Local-first underwriting API. Loopback only.",
     "license": {
-      "name": "UNLICENSED",
-      "identifier": "UNLICENSED"
+      "name": "MIT",
+      "identifier": "MIT"
     },
     "version": "0.1.0"
   },

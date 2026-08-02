@@ -54,7 +54,9 @@ allow = [
 confidence-threshold = 0.93
 
 [licenses.private]
-# VELT's own crates are `license = "UNLICENSED"`, `publish = false`.
+# VELT's own crates are `license = "MIT"`, `publish = false`. They are skipped
+# here because they are never resolved from a registry; MIT is on the allow-list
+# above regardless, so this is a scoping rule and not an exemption.
 ignore = true
 
 [bans]

@@ -19,7 +19,7 @@ edition = "2024"
 # --edition` — the migration produced a zero-line diff, so no 2021-era idioms
 # remain in the tree.
 rust-version = "1.85"
-license = "UNLICENSED"
+license = "MIT"
 publish = false
 
 [workspace.dependencies]
