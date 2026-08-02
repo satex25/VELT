@@ -1,0 +1,21 @@
+--- crates/velt-money/src/lib.rs
++++ replace >= with < in div_round_half_away
+@@ -492,17 +492,17 @@
+         op: "div_round_half_away",
+     })?;
+     if rem == 0 {
+         return Ok(quot);
+     }
+     let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {
+         op: "div_round_half_away",
+     })?;
+-    if twice.abs() >= denom.abs() {
++    if twice.abs() < /* ~ changed by cargo-mutants ~ */ denom.abs() {
+         let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };
+         quot.checked_add(step).ok_or(MoneyError::Overflow {
+             op: "div_round_half_away",
+         })
+     } else {
+         Ok(quot)
+     }
+ }

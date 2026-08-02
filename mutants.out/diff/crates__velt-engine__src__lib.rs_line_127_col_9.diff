@@ -1,0 +1,21 @@
+--- crates/velt-engine/src/lib.rs
++++ replace UnderwriteInputs::currency -> Currency with Default::default()
+@@ -119,17 +119,17 @@
+     /// Acquisition and debt.
+     pub deal: DealInputs,
+ }
+ 
+ impl UnderwriteInputs {
+     /// The currency this underwrite is denominated in.
+     #[must_use]
+     pub const fn currency(&self) -> Currency {
+-        self.deal.purchase_price.currency()
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// A completed underwrite. Every field carries its derivation.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+ pub struct Underwrite {
+     /// Gross potential rent (annual).
+     pub gross_potential_rent: Traced<Money>,

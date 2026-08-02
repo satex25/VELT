@@ -1,0 +1,21 @@
+--- crates/velt-engine/src/amort.rs
++++ replace > with >= in pow_fp
+@@ -28,17 +28,17 @@
+     })
+ }
+ 
+ /// Raise a fixed-point base to an integer power by binary exponentiation.
+ fn pow_fp(base: i128, exp: u32) -> Result<i128> {
+     let mut result = SCALE;
+     let mut base = base;
+     let mut exp = exp;
+-    while exp > 0 {
++    while exp >= /* ~ changed by cargo-mutants ~ */ 0 {
+         if exp & 1 == 1 {
+             result = mul_fp(result, base)?;
+         }
+         exp >>= 1;
+         if exp > 0 {
+             base = mul_fp(base, base)?;
+         }
+     }

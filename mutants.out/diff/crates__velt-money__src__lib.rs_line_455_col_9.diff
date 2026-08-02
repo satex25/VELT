@@ -1,0 +1,27 @@
+--- crates/velt-money/src/lib.rs
++++ replace Bps::div_int -> Result<Self> with Ok(Default::default())
+@@ -447,23 +447,17 @@
+         Self::ONE.sub(self)
+     }
+ 
+     /// Divide this rate by an integer (e.g. an annual rate to monthly).
+     ///
+     /// # Errors
+     /// [`MoneyError::DivideByZero`] or [`MoneyError::Overflow`].
+     pub fn div_int(self, n: i64) -> Result<Self> {
+-        if n == 0 {
+-            return Err(MoneyError::DivideByZero { op: "Bps::div_int" });
+-        }
+-        let raw = div_round_half_away(i128::from(self.0), i128::from(n))?;
+-        i64::try_from(raw)
+-            .map(Self)
+-            .map_err(|_| MoneyError::Overflow { op: "Bps::div_int" })
++        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ impl fmt::Display for Bps {
+     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+         let sign = if self.0 < 0 { "-" } else { "" };
+         let abs = self.0.unsigned_abs();
+         let whole = abs.checked_div(100).unwrap_or(0);

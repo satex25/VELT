@@ -1,0 +1,21 @@
+--- crates/velt-money/src/lib.rs
++++ replace Money::is_zero -> bool with false
+@@ -163,17 +163,17 @@
+     #[must_use]
+     pub const fn currency(self) -> Currency {
+         self.currency
+     }
+ 
+     /// True if the amount is exactly zero.
+     #[must_use]
+     pub const fn is_zero(self) -> bool {
+-        self.minor == 0
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// True if the amount is strictly greater than zero.
+     #[must_use]
+     pub const fn is_positive(self) -> bool {
+         self.minor > 0
+     }
+ 

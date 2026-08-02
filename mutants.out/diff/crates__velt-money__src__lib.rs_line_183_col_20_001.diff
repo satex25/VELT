@@ -1,0 +1,21 @@
+--- crates/velt-money/src/lib.rs
++++ replace < with > in Money::is_negative
+@@ -175,17 +175,17 @@
+     #[must_use]
+     pub const fn is_positive(self) -> bool {
+         self.minor > 0
+     }
+ 
+     /// True if the amount is strictly less than zero.
+     #[must_use]
+     pub const fn is_negative(self) -> bool {
+-        self.minor < 0
++        self.minor > /* ~ changed by cargo-mutants ~ */ 0
+     }
+ 
+     fn same_currency(self, rhs: Self) -> Result<()> {
+         if self.currency == rhs.currency {
+             Ok(())
+         } else {
+             Err(MoneyError::CurrencyMismatch {
+                 lhs: self.currency,

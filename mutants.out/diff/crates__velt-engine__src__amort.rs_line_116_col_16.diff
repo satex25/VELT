@@ -1,0 +1,21 @@
+--- crates/velt-engine/src/amort.rs
++++ replace == with != in monthly_payment
+@@ -108,17 +108,17 @@
+     }
+     if principal.is_zero() {
+         return Ok(Money::zero(principal.currency()));
+     }
+ 
+     let rate_fp = monthly_rate_fp(annual_rate)?;
+ 
+     // Zero-interest loan: principal spread evenly across the term.
+-    if rate_fp == 0 {
++    if rate_fp != /* ~ changed by cargo-mutants ~ */ 0 {
+         return principal.div_int(i64::from(term_months));
+     }
+ 
+     let one_plus = SCALE.checked_add(rate_fp).ok_or(MoneyError::Overflow {
+         op: "amort::one_plus",
+     })?;
+     let growth = pow_fp(one_plus, term_months)?;
+     let growth_less_one = growth.checked_sub(SCALE).ok_or(MoneyError::Overflow {

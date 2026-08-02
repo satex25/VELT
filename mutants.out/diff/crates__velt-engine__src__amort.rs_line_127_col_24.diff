@@ -1,0 +1,21 @@
+--- crates/velt-engine/src/amort.rs
++++ replace <= with > in monthly_payment
+@@ -119,17 +119,17 @@
+ 
+     let one_plus = SCALE.checked_add(rate_fp).ok_or(MoneyError::Overflow {
+         op: "amort::one_plus",
+     })?;
+     let growth = pow_fp(one_plus, term_months)?;
+     let growth_less_one = growth.checked_sub(SCALE).ok_or(MoneyError::Overflow {
+         op: "amort::growth",
+     })?;
+-    if growth_less_one <= 0 {
++    if growth_less_one > /* ~ changed by cargo-mutants ~ */ 0 {
+         return Err(MoneyError::Overflow {
+             op: "amort::growth_underflow",
+         });
+     }
+ 
+     // payment = L * r * (1+r)^n / ((1+r)^n - 1)
+     // Held in i128 with a single rounding at the end, so the schedule agrees
+     // with a lender's amortization table to the cent.

@@ -1,0 +1,47 @@
+--- crates/velt-money/src/lib.rs
++++ replace div_round_half_away -> Result<i128> with Ok(-1)
+@@ -473,43 +473,17 @@
+ }
+ 
+ /// Integer division rounding half away from zero.
+ ///
+ /// The one rounding primitive in VELT. Half-away-from-zero is chosen over
+ /// banker's rounding because it matches the convention lenders and HUD schedules
+ /// use in published figures, so hand-verified fixtures agree to the cent.
+ fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {
+-    if denom == 0 {
+-        return Err(MoneyError::DivideByZero {
+-            op: "div_round_half_away",
+-        });
+-    }
+-    // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,
+-    // and doctrine §5 does not permit a financial path that can panic.
+-    let quot = numer.checked_div(denom).ok_or(MoneyError::Overflow {
+-        op: "div_round_half_away",
+-    })?;
+-    let rem = numer.checked_rem(denom).ok_or(MoneyError::Overflow {
+-        op: "div_round_half_away",
+-    })?;
+-    if rem == 0 {
+-        return Ok(quot);
+-    }
+-    let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {
+-        op: "div_round_half_away",
+-    })?;
+-    if twice.abs() >= denom.abs() {
+-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };
+-        quot.checked_add(step).ok_or(MoneyError::Overflow {
+-            op: "div_round_half_away",
+-        })
+-    } else {
+-        Ok(quot)
+-    }
++    Ok(-1) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+ 
+     const USD: Currency = Currency::Usd;
+ 

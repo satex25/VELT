@@ -1,0 +1,24 @@
+--- crates/velt-money/src/lib.rs
++++ replace Bps::sub -> Result<Self> with Ok(Default::default())
+@@ -428,20 +428,17 @@
+     ///
+     /// # Errors
+     /// [`MoneyError::Overflow`].
+     /// Not `std::ops::Add`: that trait is infallible, and money addition here
+     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money
+     /// arithmetic that cannot report being wrong.
+     #[allow(clippy::should_implement_trait)]
+     pub fn sub(self, rhs: Self) -> Result<Self> {
+-        self.0
+-            .checked_sub(rhs.0)
+-            .map(Self)
+-            .ok_or(MoneyError::Overflow { op: "Bps::sub" })
++        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// The complement of this rate (`1 - self`), e.g. 1 - vacancy.
+     ///
+     /// # Errors
+     /// [`MoneyError::Overflow`].
+     pub fn complement(self) -> Result<Self> {
+         Self::ONE.sub(self)

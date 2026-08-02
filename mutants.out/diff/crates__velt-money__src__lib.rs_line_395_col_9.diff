@@ -1,0 +1,23 @@
+--- crates/velt-money/src/lib.rs
++++ replace Bps::from_percent -> Result<Self> with Ok(Default::default())
+@@ -387,19 +387,17 @@
+         Self(raw)
+     }
+ 
+     /// Construct from whole percentage points (7% -> 700 bp).
+     ///
+     /// # Errors
+     /// [`MoneyError::Overflow`].
+     pub fn from_percent(pct: i64) -> Result<Self> {
+-        pct.checked_mul(100).map(Self).ok_or(MoneyError::Overflow {
+-            op: "Bps::from_percent",
+-        })
++        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// The raw basis-point count.
+     #[must_use]
+     pub const fn raw(self) -> i64 {
+         self.0
+     }
+ 

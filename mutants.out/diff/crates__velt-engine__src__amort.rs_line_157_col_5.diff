@@ -1,0 +1,21 @@
+--- crates/velt-engine/src/amort.rs
++++ replace annual_debt_service -> Result<Money> with Ok(Default::default())
+@@ -149,17 +149,17 @@
+     Ok(Money::from_minor(minor, principal.currency()))
+ }
+ 
+ /// Total debt service over twelve months.
+ ///
+ /// # Errors
+ /// As [`monthly_payment`], plus [`MoneyError::Overflow`].
+ pub fn annual_debt_service(principal: Money, annual_rate: Bps, term_months: u32) -> Result<Money> {
+-    monthly_payment(principal, annual_rate, term_months)?.mul_int(MONTHS_PER_YEAR)
++    Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Remaining balance after `elapsed_months` payments.
+ ///
+ /// Computed from the closed-form balance rather than by iterating the schedule,
+ /// so a 30-year hold is the same cost as a 1-year hold.
+ ///
+ /// # Errors

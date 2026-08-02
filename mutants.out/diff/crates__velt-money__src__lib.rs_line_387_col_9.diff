@@ -1,0 +1,21 @@
+--- crates/velt-money/src/lib.rs
++++ replace Bps::from_raw -> Self with Default::default()
+@@ -379,17 +379,17 @@
+     pub const ZERO: Self = Self(0);
+ 
+     /// 100%.
+     pub const ONE: Self = Self(Self::SCALE);
+ 
+     /// Construct from a raw basis-point count.
+     #[must_use]
+     pub const fn from_raw(raw: i64) -> Self {
+-        Self(raw)
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Construct from whole percentage points (7% -> 700 bp).
+     ///
+     /// # Errors
+     /// [`MoneyError::Overflow`].
+     pub fn from_percent(pct: i64) -> Result<Self> {
+         pct.checked_mul(100).map(Self).ok_or(MoneyError::Overflow {

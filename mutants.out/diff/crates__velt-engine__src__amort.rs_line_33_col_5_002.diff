@@ -1,0 +1,33 @@
+--- crates/velt-engine/src/amort.rs
++++ replace pow_fp -> Result<i128> with Ok(-1)
+@@ -25,29 +25,17 @@
+     })?;
+     product.checked_div(SCALE).ok_or(MoneyError::Overflow {
+         op: "amort::mul_fp",
+     })
+ }
+ 
+ /// Raise a fixed-point base to an integer power by binary exponentiation.
+ fn pow_fp(base: i128, exp: u32) -> Result<i128> {
+-    let mut result = SCALE;
+-    let mut base = base;
+-    let mut exp = exp;
+-    while exp > 0 {
+-        if exp & 1 == 1 {
+-            result = mul_fp(result, base)?;
+-        }
+-        exp >>= 1;
+-        if exp > 0 {
+-            base = mul_fp(base, base)?;
+-        }
+-    }
+-    Ok(result)
++    Ok(-1) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Integer division rounding half away from zero.
+ fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {
+     if denom == 0 {
+         return Err(MoneyError::DivideByZero { op: "amort::div" });
+     }
+     // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,

@@ -1,0 +1,21 @@
+--- crates/velt-engine/src/amort.rs
++++ replace == with != in div_round_half_away
+@@ -42,17 +42,17 @@
+             base = mul_fp(base, base)?;
+         }
+     }
+     Ok(result)
+ }
+ 
+ /// Integer division rounding half away from zero.
+ fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {
+-    if denom == 0 {
++    if denom != /* ~ changed by cargo-mutants ~ */ 0 {
+         return Err(MoneyError::DivideByZero { op: "amort::div" });
+     }
+     // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,
+     // and doctrine §5 does not permit a financial path that can panic.
+     let quot = numer
+         .checked_div(denom)
+         .ok_or(MoneyError::Overflow { op: "amort::div" })?;
+     let rem = numer

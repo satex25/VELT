@@ -1,0 +1,21 @@
+--- crates/velt-engine/src/lib.rs
++++ replace >= with < in underwrite
+@@ -175,17 +175,17 @@
+     let currency = inputs.currency();
+ 
+     if !inputs.deal.purchase_price.is_positive() {
+         return Err(EngineError::InvalidInput {
+             field: "purchase_price",
+             detail: "must be greater than zero",
+         });
+     }
+-    if inputs.income.vacancy_rate.raw() < 0 || inputs.income.vacancy_rate >= Bps::ONE {
++    if inputs.income.vacancy_rate.raw() < 0 || inputs.income.vacancy_rate < /* ~ changed by cargo-mutants ~ */ Bps::ONE {
+         return Err(EngineError::InvalidInput {
+             field: "vacancy_rate",
+             detail: "must be in [0%, 100%)",
+         });
+     }
+ 
+     // --- Income -----------------------------------------------------------
+     let gpr_value = inputs

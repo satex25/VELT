@@ -1,0 +1,28 @@
+--- crates/velt-money/src/lib.rs
++++ replace Money::mul_int -> Result<Self> with Ok(Default::default())
+@@ -253,24 +253,17 @@
+         })
+     }
+ 
+     /// Multiply by an integer scalar (e.g. 12 months).
+     ///
+     /// # Errors
+     /// [`MoneyError::Overflow`].
+     pub fn mul_int(self, n: i64) -> Result<Self> {
+-        let minor = self
+-            .minor
+-            .checked_mul(n)
+-            .ok_or(MoneyError::Overflow { op: "mul_int" })?;
+-        Ok(Self {
+-            minor,
+-            currency: self.currency,
+-        })
++        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Sum an iterator of amounts, requiring a currency for the empty case.
+     ///
+     /// # Errors
+     /// [`MoneyError::CurrencyMismatch`] or [`MoneyError::Overflow`].
+     pub fn sum<I: IntoIterator<Item = Self>>(items: I, currency: Currency) -> Result<Self> {
+         items

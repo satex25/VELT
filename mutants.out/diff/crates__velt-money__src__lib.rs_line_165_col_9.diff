@@ -1,0 +1,21 @@
+--- crates/velt-money/src/lib.rs
++++ replace Money::currency -> Currency with Default::default()
+@@ -157,17 +157,17 @@
+     #[must_use]
+     pub const fn minor(self) -> i64 {
+         self.minor
+     }
+ 
+     /// The currency tag.
+     #[must_use]
+     pub const fn currency(self) -> Currency {
+-        self.currency
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// True if the amount is exactly zero.
+     #[must_use]
+     pub const fn is_zero(self) -> bool {
+         self.minor == 0
+     }
+ 

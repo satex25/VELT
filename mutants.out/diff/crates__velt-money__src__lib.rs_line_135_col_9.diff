@@ -1,0 +1,21 @@
+--- crates/velt-money/src/lib.rs
++++ replace Money::from_minor -> Self with Default::default()
+@@ -127,17 +127,17 @@
+     /// Currency of this amount.
+     currency: Currency,
+ }
+ 
+ impl Money {
+     /// Construct from minor units (cents).
+     #[must_use]
+     pub const fn from_minor(minor: i64, currency: Currency) -> Self {
+-        Self { minor, currency }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Construct from whole major units (dollars).
+     ///
+     /// # Errors
+     /// Returns [`MoneyError::Overflow`] if the amount does not fit in `i64`
+     /// minor units.
+     pub fn from_major(major: i64, currency: Currency) -> Result<Self> {

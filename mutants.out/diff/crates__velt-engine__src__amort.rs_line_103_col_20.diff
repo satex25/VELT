@@ -1,0 +1,21 @@
+--- crates/velt-engine/src/amort.rs
++++ replace == with != in monthly_payment
+@@ -95,17 +95,17 @@
+ ///
+ /// A zero rate degrades to straight-line principal repayment rather than
+ /// dividing by zero.
+ ///
+ /// # Errors
+ /// [`MoneyError::NonPositive`] if the term is not positive,
+ /// [`MoneyError::Overflow`] if the compounding intermediates exceed i128.
+ pub fn monthly_payment(principal: Money, annual_rate: Bps, term_months: u32) -> Result<Money> {
+-    if term_months == 0 {
++    if term_months != /* ~ changed by cargo-mutants ~ */ 0 {
+         return Err(MoneyError::NonPositive {
+             field: "term_months",
+             value: 0,
+         });
+     }
+     if principal.is_zero() {
+         return Ok(Money::zero(principal.currency()));
+     }

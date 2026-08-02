@@ -1,0 +1,24 @@
+--- crates/velt-money/src/lib.rs
++++ replace Bps::add -> Result<Self> with Ok(Default::default())
+@@ -413,20 +413,17 @@
+     ///
+     /// # Errors
+     /// [`MoneyError::Overflow`].
+     /// Not `std::ops::Add`: that trait is infallible, and money addition here
+     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money
+     /// arithmetic that cannot report being wrong.
+     #[allow(clippy::should_implement_trait)]
+     pub fn add(self, rhs: Self) -> Result<Self> {
+-        self.0
+-            .checked_add(rhs.0)
+-            .map(Self)
+-            .ok_or(MoneyError::Overflow { op: "Bps::add" })
++        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Checked subtraction.
+     ///
+     /// # Errors
+     /// [`MoneyError::Overflow`].
+     /// Not `std::ops::Add`: that trait is infallible, and money addition here
+     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money

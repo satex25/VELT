@@ -1,0 +1,274 @@
+--- crates/velt-engine/src/lib.rs
++++ replace underwrite -> Result<Underwrite> with Ok(Default::default())
+@@ -167,270 +167,17 @@
+ ///
+ /// Pure: the same inputs always produce the same outputs, including the same
+ /// provenance tree.
+ ///
+ /// # Errors
+ /// [`EngineError::InvalidInput`] if an input violates a modelling precondition,
+ /// or [`EngineError::Money`] on overflow or currency mismatch.
+ pub fn underwrite(inputs: &UnderwriteInputs, traced: &TracedInputs) -> Result<Underwrite> {
+-    let currency = inputs.currency();
+-
+-    if !inputs.deal.purchase_price.is_positive() {
+-        return Err(EngineError::InvalidInput {
+-            field: "purchase_price",
+-            detail: "must be greater than zero",
+-        });
+-    }
+-    if inputs.income.vacancy_rate.raw() < 0 || inputs.income.vacancy_rate >= Bps::ONE {
+-        return Err(EngineError::InvalidInput {
+-            field: "vacancy_rate",
+-            detail: "must be in [0%, 100%)",
+-        });
+-    }
+-
+-    // --- Income -----------------------------------------------------------
+-    let gpr_value = inputs
+-        .income
+-        .monthly_scheduled_rent
+-        .mul_int(amort::MONTHS_PER_YEAR)?;
+-    let gross_potential_rent = derive(
+-        "Gross potential rent",
+-        "gpr",
+-        &[&traced.monthly_rent.trace],
+-        gpr_value,
+-    );
+-
+-    let vacancy_value = gpr_value.apply(inputs.income.vacancy_rate)?;
+-    let vacancy_loss = derive(
+-        "Vacancy & credit loss",
+-        "vacancy_loss",
+-        &[&gross_potential_rent.trace, &traced.vacancy_rate.trace],
+-        vacancy_value,
+-    );
+-
+-    let egi_value = gpr_value
+-        .sub(vacancy_value)?
+-        .add(inputs.income.other_annual_income)?;
+-    let effective_gross_income = derive(
+-        "Effective gross income",
+-        "egi",
+-        &[
+-            &gross_potential_rent.trace,
+-            &vacancy_loss.trace,
+-            &traced.other_income.trace,
+-        ],
+-        egi_value,
+-    );
+-
+-    // --- Expenses ---------------------------------------------------------
+-    // Rate-based expenses bill against collected income, not scheduled income.
+-    let management = egi_value.apply(inputs.expenses.management_rate)?;
+-    let maintenance = egi_value.apply(inputs.expenses.maintenance_rate)?;
+-    let reserves = egi_value.apply(inputs.expenses.capex_reserve_rate)?;
+-
+-    let opex_value = Money::sum(
+-        [
+-            inputs.expenses.annual_property_tax,
+-            inputs.expenses.annual_insurance,
+-            inputs.expenses.annual_hoa,
+-            inputs.expenses.annual_utilities,
+-            inputs.expenses.annual_other_fixed,
+-            management,
+-            maintenance,
+-            reserves,
+-        ],
+-        currency,
+-    )?;
+-    let operating_expenses = derive(
+-        "Operating expenses",
+-        "opex",
+-        &[
+-            &traced.property_tax.trace,
+-            &traced.insurance.trace,
+-            &traced.fixed_other.trace,
+-            &effective_gross_income.trace,
+-            &traced.management_rate.trace,
+-            &traced.maintenance_rate.trace,
+-            &traced.reserve_rate.trace,
+-        ],
+-        opex_value,
+-    );
+-
+-    // --- NOI --------------------------------------------------------------
+-    let noi_value = egi_value.sub(opex_value)?;
+-    let net_operating_income = derive(
+-        "Net operating income",
+-        "noi",
+-        &[&effective_gross_income.trace, &operating_expenses.trace],
+-        noi_value,
+-    );
+-
+-    // --- Debt -------------------------------------------------------------
+-    let loan_value =
+-        amort::principal_from_ltv(inputs.deal.purchase_price, inputs.deal.down_payment_rate)?;
+-    let loan_amount = derive(
+-        "Loan amount",
+-        "loan",
+-        &[
+-            &traced.purchase_price.trace,
+-            &traced.down_payment_rate.trace,
+-        ],
+-        loan_value,
+-    );
+-
+-    let ads_value = amort::annual_debt_service(
+-        loan_value,
+-        inputs.deal.interest_rate,
+-        inputs.deal.term_months,
+-    )?;
+-    let annual_debt_service = derive(
+-        "Annual debt service",
+-        "ads",
+-        &[
+-            &loan_amount.trace,
+-            &traced.interest_rate.trace,
+-            &traced.term_months.trace,
+-        ],
+-        ads_value,
+-    );
+-
+-    let cfbt_value = noi_value.sub(ads_value)?;
+-    let cash_flow_before_tax = derive(
+-        "Cash flow before tax",
+-        "cfbt",
+-        &[&net_operating_income.trace, &annual_debt_service.trace],
+-        cfbt_value,
+-    );
+-
+-    // --- Basis ------------------------------------------------------------
+-    let down_payment = inputs
+-        .deal
+-        .purchase_price
+-        .apply(inputs.deal.down_payment_rate)?;
+-    let cash_value = Money::sum(
+-        [
+-            down_payment,
+-            inputs.deal.closing_costs,
+-            inputs.deal.rehab_budget,
+-        ],
+-        currency,
+-    )?;
+-    let total_cash_invested = derive(
+-        "Total cash invested",
+-        "cash_invested",
+-        &[
+-            &traced.purchase_price.trace,
+-            &traced.down_payment_rate.trace,
+-            &traced.closing_costs.trace,
+-            &traced.rehab_budget.trace,
+-        ],
+-        cash_value,
+-    );
+-
+-    // --- Ratios -----------------------------------------------------------
+-    let cap_value = noi_value.ratio_to(inputs.deal.purchase_price)?;
+-    let cap_rate = derive(
+-        "Cap rate",
+-        "cap_rate",
+-        &[&net_operating_income.trace, &traced.purchase_price.trace],
+-        cap_value,
+-    );
+-
+-    let dscr_value = if ads_value.is_positive() {
+-        noi_value.ratio_to(ads_value)?
+-    } else {
+-        // No debt means coverage is undefined rather than infinite. Zero here
+-        // would read as "fails coverage", which is the opposite of the truth,
+-        // so an all-cash deal reports the sentinel below and the terminal
+-        // renders it as "n/a".
+-        Bps::from_raw(i64::MAX)
+-    };
+-    let dscr = derive(
+-        "DSCR",
+-        "dscr",
+-        &[&net_operating_income.trace, &annual_debt_service.trace],
+-        dscr_value,
+-    );
+-
+-    let coc_value = if cash_value.is_positive() {
+-        cfbt_value.ratio_to(cash_value)?
+-    } else {
+-        return Err(EngineError::InvalidInput {
+-            field: "total_cash_invested",
+-            detail: "must be greater than zero to compute cash-on-cash",
+-        });
+-    };
+-    let cash_on_cash = derive(
+-        "Cash-on-cash",
+-        "coc",
+-        &[&cash_flow_before_tax.trace, &total_cash_invested.trace],
+-        coc_value,
+-    );
+-
+-    let expense_ratio_value = if egi_value.is_positive() {
+-        opex_value.ratio_to(egi_value)?
+-    } else {
+-        Bps::ZERO
+-    };
+-    let expense_ratio = derive(
+-        "Expense ratio",
+-        "expense_ratio",
+-        &[&operating_expenses.trace, &effective_gross_income.trace],
+-        expense_ratio_value,
+-    );
+-
+-    let grm_value = if gpr_value.is_positive() {
+-        inputs.deal.purchase_price.ratio_to(gpr_value)?
+-    } else {
+-        Bps::ZERO
+-    };
+-    let gross_rent_multiplier = derive(
+-        "Gross rent multiplier",
+-        "grm",
+-        &[&traced.purchase_price.trace, &gross_potential_rent.trace],
+-        grm_value,
+-    );
+-
+-    // Break-even occupancy = (OpEx + ADS) / GPR. Below this collection rate the
+-    // deal burns cash; it is the single number that tells an operator how much
+-    // room the rent roll has before the deal stops paying for itself.
+-    let breakeven_value = if gpr_value.is_positive() {
+-        opex_value.add(ads_value)?.ratio_to(gpr_value)?
+-    } else {
+-        Bps::ZERO
+-    };
+-    let break_even_occupancy = derive(
+-        "Break-even occupancy",
+-        "break_even",
+-        &[
+-            &operating_expenses.trace,
+-            &annual_debt_service.trace,
+-            &gross_potential_rent.trace,
+-        ],
+-        breakeven_value,
+-    );
+-
+-    Ok(Underwrite {
+-        gross_potential_rent,
+-        vacancy_loss,
+-        effective_gross_income,
+-        operating_expenses,
+-        net_operating_income,
+-        annual_debt_service,
+-        cash_flow_before_tax,
+-        total_cash_invested,
+-        loan_amount,
+-        cap_rate,
+-        dscr,
+-        cash_on_cash,
+-        expense_ratio,
+-        gross_rent_multiplier,
+-        break_even_occupancy,
+-    })
++    Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// The traced leaves for an underwrite.
+ ///
+ /// Inputs arrive already traced — from a [`velt_connector::Datum`] for external
+ /// data or from operator entry — so the engine never invents an origin. It is a
+ /// separate struct from [`UnderwriteInputs`] so that the numeric model and the
+ /// provenance plumbing can be read independently.

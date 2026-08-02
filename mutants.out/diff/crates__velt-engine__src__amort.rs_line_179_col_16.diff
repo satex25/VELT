@@ -1,0 +1,21 @@
+--- crates/velt-engine/src/amort.rs
++++ replace == with != in remaining_balance
+@@ -171,17 +171,17 @@
+     elapsed_months: u32,
+ ) -> Result<Money> {
+     if elapsed_months >= term_months {
+         return Ok(Money::zero(principal.currency()));
+     }
+     let payment = monthly_payment(principal, annual_rate, term_months)?;
+     let rate_fp = monthly_rate_fp(annual_rate)?;
+ 
+-    if rate_fp == 0 {
++    if rate_fp != /* ~ changed by cargo-mutants ~ */ 0 {
+         let paid = payment.mul_int(i64::from(elapsed_months))?;
+         return principal.sub(paid);
+     }
+ 
+     let one_plus = SCALE.checked_add(rate_fp).ok_or(MoneyError::Overflow {
+         op: "amort::one_plus",
+     })?;
+     let growth = pow_fp(one_plus, elapsed_months)?;

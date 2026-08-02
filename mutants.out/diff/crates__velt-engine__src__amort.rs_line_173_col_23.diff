@@ -1,0 +1,21 @@
+--- crates/velt-engine/src/amort.rs
++++ replace >= with < in remaining_balance
+@@ -165,17 +165,17 @@
+ /// # Errors
+ /// [`MoneyError::Overflow`] or [`MoneyError::NonPositive`].
+ pub fn remaining_balance(
+     principal: Money,
+     annual_rate: Bps,
+     term_months: u32,
+     elapsed_months: u32,
+ ) -> Result<Money> {
+-    if elapsed_months >= term_months {
++    if elapsed_months < /* ~ changed by cargo-mutants ~ */ term_months {
+         return Ok(Money::zero(principal.currency()));
+     }
+     let payment = monthly_payment(principal, annual_rate, term_months)?;
+     let rate_fp = monthly_rate_fp(annual_rate)?;
+ 
+     if rate_fp == 0 {
+         let paid = payment.mul_int(i64::from(elapsed_months))?;
+         return principal.sub(paid);

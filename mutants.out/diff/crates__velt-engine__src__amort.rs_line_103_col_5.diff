@@ -1,0 +1,67 @@
+--- crates/velt-engine/src/amort.rs
++++ replace monthly_payment -> Result<Money> with Ok(Default::default())
+@@ -95,63 +95,17 @@
+ ///
+ /// A zero rate degrades to straight-line principal repayment rather than
+ /// dividing by zero.
+ ///
+ /// # Errors
+ /// [`MoneyError::NonPositive`] if the term is not positive,
+ /// [`MoneyError::Overflow`] if the compounding intermediates exceed i128.
+ pub fn monthly_payment(principal: Money, annual_rate: Bps, term_months: u32) -> Result<Money> {
+-    if term_months == 0 {
+-        return Err(MoneyError::NonPositive {
+-            field: "term_months",
+-            value: 0,
+-        });
+-    }
+-    if principal.is_zero() {
+-        return Ok(Money::zero(principal.currency()));
+-    }
+-
+-    let rate_fp = monthly_rate_fp(annual_rate)?;
+-
+-    // Zero-interest loan: principal spread evenly across the term.
+-    if rate_fp == 0 {
+-        return principal.div_int(i64::from(term_months));
+-    }
+-
+-    let one_plus = SCALE.checked_add(rate_fp).ok_or(MoneyError::Overflow {
+-        op: "amort::one_plus",
+-    })?;
+-    let growth = pow_fp(one_plus, term_months)?;
+-    let growth_less_one = growth.checked_sub(SCALE).ok_or(MoneyError::Overflow {
+-        op: "amort::growth",
+-    })?;
+-    if growth_less_one <= 0 {
+-        return Err(MoneyError::Overflow {
+-            op: "amort::growth_underflow",
+-        });
+-    }
+-
+-    // payment = L * r * (1+r)^n / ((1+r)^n - 1)
+-    // Held in i128 with a single rounding at the end, so the schedule agrees
+-    // with a lender's amortization table to the cent.
+-    let numer = i128::from(principal.minor())
+-        .checked_mul(rate_fp)
+-        .ok_or(MoneyError::Overflow { op: "amort::numer" })?
+-        .checked_mul(growth)
+-        .ok_or(MoneyError::Overflow { op: "amort::numer" })?;
+-    let denom = SCALE
+-        .checked_mul(growth_less_one)
+-        .ok_or(MoneyError::Overflow { op: "amort::denom" })?;
+-
+-    let minor = div_round_half_away(numer, denom)?;
+-    let minor = i64::try_from(minor).map_err(|_| MoneyError::Overflow {
+-        op: "amort::payment",
+-    })?;
+-    Ok(Money::from_minor(minor, principal.currency()))
++    Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Total debt service over twelve months.
+ ///
+ /// # Errors
+ /// As [`monthly_payment`], plus [`MoneyError::Overflow`].
+ pub fn annual_debt_service(principal: Money, annual_rate: Bps, term_months: u32) -> Result<Money> {
+     monthly_payment(principal, annual_rate, term_months)?.mul_int(MONTHS_PER_YEAR)

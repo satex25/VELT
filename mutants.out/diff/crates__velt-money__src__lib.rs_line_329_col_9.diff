@@ -1,0 +1,33 @@
+--- crates/velt-money/src/lib.rs
++++ replace Money::ratio_to -> Result<Bps> with Ok(Default::default())
+@@ -321,29 +321,17 @@
+     /// This is how every ratio metric in VELT (cap rate, cash-on-cash, DSCR) is
+     /// produced: integer numerator over integer denominator, scaled to bps, with
+     /// one rounding step.
+     ///
+     /// # Errors
+     /// [`MoneyError::CurrencyMismatch`], [`MoneyError::NonPositive`] if `base`
+     /// is not positive, or [`MoneyError::Overflow`].
+     pub fn ratio_to(self, base: Self) -> Result<Bps> {
+-        self.same_currency(base)?;
+-        if !base.is_positive() {
+-            return Err(MoneyError::NonPositive {
+-                field: "ratio_to base",
+-                value: base.minor,
+-            });
+-        }
+-        let numer = i128::from(self.minor)
+-            .checked_mul(i128::from(Bps::SCALE))
+-            .ok_or(MoneyError::Overflow { op: "ratio_to" })?;
+-        let raw = div_round_half_away(numer, i128::from(base.minor))?;
+-        let raw = i64::try_from(raw).map_err(|_| MoneyError::Overflow { op: "ratio_to" })?;
+-        Ok(Bps::from_raw(raw))
++        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ impl fmt::Display for Money {
+     /// Renders with the currency's full precision and no locale grouping.
+     /// Presentation formatting belongs in the terminal UI, not in the type.
+     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+         let sign = if self.minor < 0 { "-" } else { "" };

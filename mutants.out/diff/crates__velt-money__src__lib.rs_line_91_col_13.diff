@@ -1,0 +1,21 @@
+--- crates/velt-money/src/lib.rs
++++ delete match arm 0 in Currency::minor_units_per_major
+@@ -83,17 +83,17 @@
+             Self::Usd | Self::Eur | Self::Gbp | Self::Cad | Self::Mxn => 2,
+         }
+     }
+ 
+     /// Number of minor units in one major unit (100 for a 2-exponent currency).
+     #[must_use]
+     pub const fn minor_units_per_major(self) -> i64 {
+         match self.exponent() {
+-            0 => 1,
++             /* ~ changed by cargo-mutants ~ */
+             1 => 10,
+             2 => 100,
+             3 => 1_000,
+             _ => 1_000,
+         }
+     }
+ 
+     /// ISO-4217 alphabetic code.

@@ -1,0 +1,3938 @@
+[
+  {
+    "diff": "--- crates/velt-engine/src/lib.rs\n+++ replace UnderwriteInputs::currency -> Currency with Default::default()\n@@ -119,17 +119,17 @@\n     /// Acquisition and debt.\n     pub deal: DealInputs,\n }\n \n impl UnderwriteInputs {\n     /// The currency this underwrite is denominated in.\n     #[must_use]\n     pub const fn currency(&self) -> Currency {\n-        self.deal.purchase_price.currency()\n+        Default::default() /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n /// A completed underwrite. Every field carries its derivation.\n #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]\n pub struct Underwrite {\n     /// Gross potential rent (annual).\n     pub gross_potential_rent: Traced<Money>,\n",
+    "file": "crates/velt-engine/src/lib.rs",
+    "function": {
+      "function_name": "UnderwriteInputs::currency",
+      "return_type": "-> Currency",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 128
+        },
+        "start": {
+          "column": 5,
+          "line": 124
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/lib.rs:127:9: replace UnderwriteInputs::currency -> Currency with Default::default()",
+    "package": "velt-engine",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 44,
+        "line": 127
+      },
+      "start": {
+        "column": 9,
+        "line": 127
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/lib.rs\n+++ replace underwrite -> Result<Underwrite> with Ok(Default::default())\n@@ -167,270 +167,17 @@\n ///\n /// Pure: the same inputs always produce the same outputs, including the same\n /// provenance tree.\n ///\n /// # Errors\n /// [`EngineError::InvalidInput`] if an input violates a modelling precondition,\n /// or [`EngineError::Money`] on overflow or currency mismatch.\n pub fn underwrite(inputs: &UnderwriteInputs, traced: &TracedInputs) -> Result<Underwrite> {\n-    let currency = inputs.currency();\n-\n-    if !inputs.deal.purchase_price.is_positive() {\n-        return Err(EngineError::InvalidInput {\n-            field: \"purchase_price\",\n-            detail: \"must be greater than zero\",\n-        });\n-    }\n-    if inputs.income.vacancy_rate.raw() < 0 || inputs.income.vacancy_rate >= Bps::ONE {\n-        return Err(EngineError::InvalidInput {\n-            field: \"vacancy_rate\",\n-            detail: \"must be in [0%, 100%)\",\n-        });\n-    }\n-\n-    // --- Income -----------------------------------------------------------\n-    let gpr_value = inputs\n-        .income\n-        .monthly_scheduled_rent\n-        .mul_int(amort::MONTHS_PER_YEAR)?;\n-    let gross_potential_rent = derive(\n-        \"Gross potential rent\",\n-        \"gpr\",\n-        &[&traced.monthly_rent.trace],\n-        gpr_value,\n-    );\n-\n-    let vacancy_value = gpr_value.apply(inputs.income.vacancy_rate)?;\n-    let vacancy_loss = derive(\n-        \"Vacancy & credit loss\",\n-        \"vacancy_loss\",\n-        &[&gross_potential_rent.trace, &traced.vacancy_rate.trace],\n-        vacancy_value,\n-    );\n-\n-    let egi_value = gpr_value\n-        .sub(vacancy_value)?\n-        .add(inputs.income.other_annual_income)?;\n-    let effective_gross_income = derive(\n-        \"Effective gross income\",\n-        \"egi\",\n-        &[\n-            &gross_potential_rent.trace,\n-            &vacancy_loss.trace,\n-            &traced.other_income.trace,\n-        ],\n-        egi_value,\n-    );\n-\n-    // --- Expenses ---------------------------------------------------------\n-    // Rate-based expenses bill against collected income, not scheduled income.\n-    let management = egi_value.apply(inputs.expenses.management_rate)?;\n-    let maintenance = egi_value.apply(inputs.expenses.maintenance_rate)?;\n-    let reserves = egi_value.apply(inputs.expenses.capex_reserve_rate)?;\n-\n-    let opex_value = Money::sum(\n-        [\n-            inputs.expenses.annual_property_tax,\n-            inputs.expenses.annual_insurance,\n-            inputs.expenses.annual_hoa,\n-            inputs.expenses.annual_utilities,\n-            inputs.expenses.annual_other_fixed,\n-            management,\n-            maintenance,\n-            reserves,\n-        ],\n-        currency,\n-    )?;\n-    let operating_expenses = derive(\n-        \"Operating expenses\",\n-        \"opex\",\n-        &[\n-            &traced.property_tax.trace,\n-            &traced.insurance.trace,\n-            &traced.fixed_other.trace,\n-            &effective_gross_income.trace,\n-            &traced.management_rate.trace,\n-            &traced.maintenance_rate.trace,\n-            &traced.reserve_rate.trace,\n-        ],\n-        opex_value,\n-    );\n-\n-    // --- NOI --------------------------------------------------------------\n-    let noi_value = egi_value.sub(opex_value)?;\n-    let net_operating_income = derive(\n-        \"Net operating income\",\n-        \"noi\",\n-        &[&effective_gross_income.trace, &operating_expenses.trace],\n-        noi_value,\n-    );\n-\n-    // --- Debt -------------------------------------------------------------\n-    let loan_value =\n-        amort::principal_from_ltv(inputs.deal.purchase_price, inputs.deal.down_payment_rate)?;\n-    let loan_amount = derive(\n-        \"Loan amount\",\n-        \"loan\",\n-        &[\n-            &traced.purchase_price.trace,\n-            &traced.down_payment_rate.trace,\n-        ],\n-        loan_value,\n-    );\n-\n-    let ads_value = amort::annual_debt_service(\n-        loan_value,\n-        inputs.deal.interest_rate,\n-        inputs.deal.term_months,\n-    )?;\n-    let annual_debt_service = derive(\n-        \"Annual debt service\",\n-        \"ads\",\n-        &[\n-            &loan_amount.trace,\n-            &traced.interest_rate.trace,\n-            &traced.term_months.trace,\n-        ],\n-        ads_value,\n-    );\n-\n-    let cfbt_value = noi_value.sub(ads_value)?;\n-    let cash_flow_before_tax = derive(\n-        \"Cash flow before tax\",\n-        \"cfbt\",\n-        &[&net_operating_income.trace, &annual_debt_service.trace],\n-        cfbt_value,\n-    );\n-\n-    // --- Basis ------------------------------------------------------------\n-    let down_payment = inputs\n-        .deal\n-        .purchase_price\n-        .apply(inputs.deal.down_payment_rate)?;\n-    let cash_value = Money::sum(\n-        [\n-            down_payment,\n-            inputs.deal.closing_costs,\n-            inputs.deal.rehab_budget,\n-        ],\n-        currency,\n-    )?;\n-    let total_cash_invested = derive(\n-        \"Total cash invested\",\n-        \"cash_invested\",\n-        &[\n-            &traced.purchase_price.trace,\n-            &traced.down_payment_rate.trace,\n-            &traced.closing_costs.trace,\n-            &traced.rehab_budget.trace,\n-        ],\n-        cash_value,\n-    );\n-\n-    // --- Ratios -----------------------------------------------------------\n-    let cap_value = noi_value.ratio_to(inputs.deal.purchase_price)?;\n-    let cap_rate = derive(\n-        \"Cap rate\",\n-        \"cap_rate\",\n-        &[&net_operating_income.trace, &traced.purchase_price.trace],\n-        cap_value,\n-    );\n-\n-    let dscr_value = if ads_value.is_positive() {\n-        noi_value.ratio_to(ads_value)?\n-    } else {\n-        // No debt means coverage is undefined rather than infinite. Zero here\n-        // would read as \"fails coverage\", which is the opposite of the truth,\n-        // so an all-cash deal reports the sentinel below and the terminal\n-        // renders it as \"n/a\".\n-        Bps::from_raw(i64::MAX)\n-    };\n-    let dscr = derive(\n-        \"DSCR\",\n-        \"dscr\",\n-        &[&net_operating_income.trace, &annual_debt_service.trace],\n-        dscr_value,\n-    );\n-\n-    let coc_value = if cash_value.is_positive() {\n-        cfbt_value.ratio_to(cash_value)?\n-    } else {\n-        return Err(EngineError::InvalidInput {\n-            field: \"total_cash_invested\",\n-            detail: \"must be greater than zero to compute cash-on-cash\",\n-        });\n-    };\n-    let cash_on_cash = derive(\n-        \"Cash-on-cash\",\n-        \"coc\",\n-        &[&cash_flow_before_tax.trace, &total_cash_invested.trace],\n-        coc_value,\n-    );\n-\n-    let expense_ratio_value = if egi_value.is_positive() {\n-        opex_value.ratio_to(egi_value)?\n-    } else {\n-        Bps::ZERO\n-    };\n-    let expense_ratio = derive(\n-        \"Expense ratio\",\n-        \"expense_ratio\",\n-        &[&operating_expenses.trace, &effective_gross_income.trace],\n-        expense_ratio_value,\n-    );\n-\n-    let grm_value = if gpr_value.is_positive() {\n-        inputs.deal.purchase_price.ratio_to(gpr_value)?\n-    } else {\n-        Bps::ZERO\n-    };\n-    let gross_rent_multiplier = derive(\n-        \"Gross rent multiplier\",\n-        \"grm\",\n-        &[&traced.purchase_price.trace, &gross_potential_rent.trace],\n-        grm_value,\n-    );\n-\n-    // Break-even occupancy = (OpEx + ADS) / GPR. Below this collection rate the\n-    // deal burns cash; it is the single number that tells an operator how much\n-    // room the rent roll has before the deal stops paying for itself.\n-    let breakeven_value = if gpr_value.is_positive() {\n-        opex_value.add(ads_value)?.ratio_to(gpr_value)?\n-    } else {\n-        Bps::ZERO\n-    };\n-    let break_even_occupancy = derive(\n-        \"Break-even occupancy\",\n-        \"break_even\",\n-        &[\n-            &operating_expenses.trace,\n-            &annual_debt_service.trace,\n-            &gross_potential_rent.trace,\n-        ],\n-        breakeven_value,\n-    );\n-\n-    Ok(Underwrite {\n-        gross_potential_rent,\n-        vacancy_loss,\n-        effective_gross_income,\n-        operating_expenses,\n-        net_operating_income,\n-        annual_debt_service,\n-        cash_flow_before_tax,\n-        total_cash_invested,\n-        loan_amount,\n-        cap_rate,\n-        dscr,\n-        cash_on_cash,\n-        expense_ratio,\n-        gross_rent_multiplier,\n-        break_even_occupancy,\n-    })\n+    Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// The traced leaves for an underwrite.\n ///\n /// Inputs arrive already traced — from a [`velt_connector::Datum`] for external\n /// data or from operator entry — so the engine never invents an origin. It is a\n /// separate struct from [`UnderwriteInputs`] so that the numeric model and the\n /// provenance plumbing can be read independently.\n",
+    "file": "crates/velt-engine/src/lib.rs",
+    "function": {
+      "function_name": "underwrite",
+      "return_type": "-> Result<Underwrite>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 429
+        },
+        "start": {
+          "column": 1,
+          "line": 166
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/lib.rs:175:5: replace underwrite -> Result<Underwrite> with Ok(Default::default())",
+    "package": "velt-engine",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 7,
+        "line": 428
+      },
+      "start": {
+        "column": 5,
+        "line": 175
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/lib.rs\n+++ delete ! in underwrite\n@@ -169,17 +169,17 @@\n /// provenance tree.\n ///\n /// # Errors\n /// [`EngineError::InvalidInput`] if an input violates a modelling precondition,\n /// or [`EngineError::Money`] on overflow or currency mismatch.\n pub fn underwrite(inputs: &UnderwriteInputs, traced: &TracedInputs) -> Result<Underwrite> {\n     let currency = inputs.currency();\n \n-    if !inputs.deal.purchase_price.is_positive() {\n+    if  /* ~ changed by cargo-mutants ~ */inputs.deal.purchase_price.is_positive() {\n         return Err(EngineError::InvalidInput {\n             field: \"purchase_price\",\n             detail: \"must be greater than zero\",\n         });\n     }\n     if inputs.income.vacancy_rate.raw() < 0 || inputs.income.vacancy_rate >= Bps::ONE {\n         return Err(EngineError::InvalidInput {\n             field: \"vacancy_rate\",\n",
+    "file": "crates/velt-engine/src/lib.rs",
+    "function": {
+      "function_name": "underwrite",
+      "return_type": "-> Result<Underwrite>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 429
+        },
+        "start": {
+          "column": 1,
+          "line": 166
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "crates/velt-engine/src/lib.rs:177:8: delete ! in underwrite",
+    "package": "velt-engine",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 9,
+        "line": 177
+      },
+      "start": {
+        "column": 8,
+        "line": 177
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/lib.rs\n+++ replace || with && in underwrite\n@@ -175,17 +175,17 @@\n     let currency = inputs.currency();\n \n     if !inputs.deal.purchase_price.is_positive() {\n         return Err(EngineError::InvalidInput {\n             field: \"purchase_price\",\n             detail: \"must be greater than zero\",\n         });\n     }\n-    if inputs.income.vacancy_rate.raw() < 0 || inputs.income.vacancy_rate >= Bps::ONE {\n+    if inputs.income.vacancy_rate.raw() < 0 && /* ~ changed by cargo-mutants ~ */ inputs.income.vacancy_rate >= Bps::ONE {\n         return Err(EngineError::InvalidInput {\n             field: \"vacancy_rate\",\n             detail: \"must be in [0%, 100%)\",\n         });\n     }\n \n     // --- Income -----------------------------------------------------------\n     let gpr_value = inputs\n",
+    "file": "crates/velt-engine/src/lib.rs",
+    "function": {
+      "function_name": "underwrite",
+      "return_type": "-> Result<Underwrite>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 429
+        },
+        "start": {
+          "column": 1,
+          "line": 166
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/lib.rs:183:45: replace || with && in underwrite",
+    "package": "velt-engine",
+    "replacement": "&&",
+    "span": {
+      "end": {
+        "column": 47,
+        "line": 183
+      },
+      "start": {
+        "column": 45,
+        "line": 183
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/lib.rs\n+++ replace < with == in underwrite\n@@ -175,17 +175,17 @@\n     let currency = inputs.currency();\n \n     if !inputs.deal.purchase_price.is_positive() {\n         return Err(EngineError::InvalidInput {\n             field: \"purchase_price\",\n             detail: \"must be greater than zero\",\n         });\n     }\n-    if inputs.income.vacancy_rate.raw() < 0 || inputs.income.vacancy_rate >= Bps::ONE {\n+    if inputs.income.vacancy_rate.raw() == /* ~ changed by cargo-mutants ~ */ 0 || inputs.income.vacancy_rate >= Bps::ONE {\n         return Err(EngineError::InvalidInput {\n             field: \"vacancy_rate\",\n             detail: \"must be in [0%, 100%)\",\n         });\n     }\n \n     // --- Income -----------------------------------------------------------\n     let gpr_value = inputs\n",
+    "file": "crates/velt-engine/src/lib.rs",
+    "function": {
+      "function_name": "underwrite",
+      "return_type": "-> Result<Underwrite>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 429
+        },
+        "start": {
+          "column": 1,
+          "line": 166
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/lib.rs:183:41: replace < with == in underwrite",
+    "package": "velt-engine",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 42,
+        "line": 183
+      },
+      "start": {
+        "column": 41,
+        "line": 183
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/lib.rs\n+++ replace < with > in underwrite\n@@ -175,17 +175,17 @@\n     let currency = inputs.currency();\n \n     if !inputs.deal.purchase_price.is_positive() {\n         return Err(EngineError::InvalidInput {\n             field: \"purchase_price\",\n             detail: \"must be greater than zero\",\n         });\n     }\n-    if inputs.income.vacancy_rate.raw() < 0 || inputs.income.vacancy_rate >= Bps::ONE {\n+    if inputs.income.vacancy_rate.raw() > /* ~ changed by cargo-mutants ~ */ 0 || inputs.income.vacancy_rate >= Bps::ONE {\n         return Err(EngineError::InvalidInput {\n             field: \"vacancy_rate\",\n             detail: \"must be in [0%, 100%)\",\n         });\n     }\n \n     // --- Income -----------------------------------------------------------\n     let gpr_value = inputs\n",
+    "file": "crates/velt-engine/src/lib.rs",
+    "function": {
+      "function_name": "underwrite",
+      "return_type": "-> Result<Underwrite>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 429
+        },
+        "start": {
+          "column": 1,
+          "line": 166
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/lib.rs:183:41: replace < with > in underwrite",
+    "package": "velt-engine",
+    "replacement": ">",
+    "span": {
+      "end": {
+        "column": 42,
+        "line": 183
+      },
+      "start": {
+        "column": 41,
+        "line": 183
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/lib.rs\n+++ replace < with <= in underwrite\n@@ -175,17 +175,17 @@\n     let currency = inputs.currency();\n \n     if !inputs.deal.purchase_price.is_positive() {\n         return Err(EngineError::InvalidInput {\n             field: \"purchase_price\",\n             detail: \"must be greater than zero\",\n         });\n     }\n-    if inputs.income.vacancy_rate.raw() < 0 || inputs.income.vacancy_rate >= Bps::ONE {\n+    if inputs.income.vacancy_rate.raw() <= /* ~ changed by cargo-mutants ~ */ 0 || inputs.income.vacancy_rate >= Bps::ONE {\n         return Err(EngineError::InvalidInput {\n             field: \"vacancy_rate\",\n             detail: \"must be in [0%, 100%)\",\n         });\n     }\n \n     // --- Income -----------------------------------------------------------\n     let gpr_value = inputs\n",
+    "file": "crates/velt-engine/src/lib.rs",
+    "function": {
+      "function_name": "underwrite",
+      "return_type": "-> Result<Underwrite>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 429
+        },
+        "start": {
+          "column": 1,
+          "line": 166
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/lib.rs:183:41: replace < with <= in underwrite",
+    "package": "velt-engine",
+    "replacement": "<=",
+    "span": {
+      "end": {
+        "column": 42,
+        "line": 183
+      },
+      "start": {
+        "column": 41,
+        "line": 183
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/lib.rs\n+++ replace >= with < in underwrite\n@@ -175,17 +175,17 @@\n     let currency = inputs.currency();\n \n     if !inputs.deal.purchase_price.is_positive() {\n         return Err(EngineError::InvalidInput {\n             field: \"purchase_price\",\n             detail: \"must be greater than zero\",\n         });\n     }\n-    if inputs.income.vacancy_rate.raw() < 0 || inputs.income.vacancy_rate >= Bps::ONE {\n+    if inputs.income.vacancy_rate.raw() < 0 || inputs.income.vacancy_rate < /* ~ changed by cargo-mutants ~ */ Bps::ONE {\n         return Err(EngineError::InvalidInput {\n             field: \"vacancy_rate\",\n             detail: \"must be in [0%, 100%)\",\n         });\n     }\n \n     // --- Income -----------------------------------------------------------\n     let gpr_value = inputs\n",
+    "file": "crates/velt-engine/src/lib.rs",
+    "function": {
+      "function_name": "underwrite",
+      "return_type": "-> Result<Underwrite>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 429
+        },
+        "start": {
+          "column": 1,
+          "line": 166
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/lib.rs:183:75: replace >= with < in underwrite",
+    "package": "velt-engine",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 77,
+        "line": 183
+      },
+      "start": {
+        "column": 75,
+        "line": 183
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace mul_fp -> Result<i128> with Ok(0)\n@@ -15,22 +15,17 @@\n \n /// Months in a year.\n pub const MONTHS_PER_YEAR: i64 = 12;\n \n type Result<T> = std::result::Result<T, MoneyError>;\n \n /// Multiply two fixed-point values.\n fn mul_fp(a: i128, b: i128) -> Result<i128> {\n-    let product = a.checked_mul(b).ok_or(MoneyError::Overflow {\n-        op: \"amort::mul_fp\",\n-    })?;\n-    product.checked_div(SCALE).ok_or(MoneyError::Overflow {\n-        op: \"amort::mul_fp\",\n-    })\n+    Ok(0) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n     while exp > 0 {\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "mul_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 29
+        },
+        "start": {
+          "column": 1,
+          "line": 21
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:23:5: replace mul_fp -> Result<i128> with Ok(0)",
+    "package": "velt-engine",
+    "replacement": "Ok(0)",
+    "span": {
+      "end": {
+        "column": 7,
+        "line": 28
+      },
+      "start": {
+        "column": 5,
+        "line": 23
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace mul_fp -> Result<i128> with Ok(1)\n@@ -15,22 +15,17 @@\n \n /// Months in a year.\n pub const MONTHS_PER_YEAR: i64 = 12;\n \n type Result<T> = std::result::Result<T, MoneyError>;\n \n /// Multiply two fixed-point values.\n fn mul_fp(a: i128, b: i128) -> Result<i128> {\n-    let product = a.checked_mul(b).ok_or(MoneyError::Overflow {\n-        op: \"amort::mul_fp\",\n-    })?;\n-    product.checked_div(SCALE).ok_or(MoneyError::Overflow {\n-        op: \"amort::mul_fp\",\n-    })\n+    Ok(1) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n     while exp > 0 {\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "mul_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 29
+        },
+        "start": {
+          "column": 1,
+          "line": 21
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:23:5: replace mul_fp -> Result<i128> with Ok(1)",
+    "package": "velt-engine",
+    "replacement": "Ok(1)",
+    "span": {
+      "end": {
+        "column": 7,
+        "line": 28
+      },
+      "start": {
+        "column": 5,
+        "line": 23
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace mul_fp -> Result<i128> with Ok(-1)\n@@ -15,22 +15,17 @@\n \n /// Months in a year.\n pub const MONTHS_PER_YEAR: i64 = 12;\n \n type Result<T> = std::result::Result<T, MoneyError>;\n \n /// Multiply two fixed-point values.\n fn mul_fp(a: i128, b: i128) -> Result<i128> {\n-    let product = a.checked_mul(b).ok_or(MoneyError::Overflow {\n-        op: \"amort::mul_fp\",\n-    })?;\n-    product.checked_div(SCALE).ok_or(MoneyError::Overflow {\n-        op: \"amort::mul_fp\",\n-    })\n+    Ok(-1) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n     while exp > 0 {\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "mul_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 29
+        },
+        "start": {
+          "column": 1,
+          "line": 21
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:23:5: replace mul_fp -> Result<i128> with Ok(-1)",
+    "package": "velt-engine",
+    "replacement": "Ok(-1)",
+    "span": {
+      "end": {
+        "column": 7,
+        "line": 28
+      },
+      "start": {
+        "column": 5,
+        "line": 23
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace pow_fp -> Result<i128> with Ok(0)\n@@ -25,29 +25,17 @@\n     })?;\n     product.checked_div(SCALE).ok_or(MoneyError::Overflow {\n         op: \"amort::mul_fp\",\n     })\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n-    let mut result = SCALE;\n-    let mut base = base;\n-    let mut exp = exp;\n-    while exp > 0 {\n-        if exp & 1 == 1 {\n-            result = mul_fp(result, base)?;\n-        }\n-        exp >>= 1;\n-        if exp > 0 {\n-            base = mul_fp(base, base)?;\n-        }\n-    }\n-    Ok(result)\n+    Ok(0) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Integer division rounding half away from zero.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n     if denom == 0 {\n         return Err(MoneyError::DivideByZero { op: \"amort::div\" });\n     }\n     // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:33:5: replace pow_fp -> Result<i128> with Ok(0)",
+    "package": "velt-engine",
+    "replacement": "Ok(0)",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 45
+      },
+      "start": {
+        "column": 5,
+        "line": 33
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace pow_fp -> Result<i128> with Ok(1)\n@@ -25,29 +25,17 @@\n     })?;\n     product.checked_div(SCALE).ok_or(MoneyError::Overflow {\n         op: \"amort::mul_fp\",\n     })\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n-    let mut result = SCALE;\n-    let mut base = base;\n-    let mut exp = exp;\n-    while exp > 0 {\n-        if exp & 1 == 1 {\n-            result = mul_fp(result, base)?;\n-        }\n-        exp >>= 1;\n-        if exp > 0 {\n-            base = mul_fp(base, base)?;\n-        }\n-    }\n-    Ok(result)\n+    Ok(1) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Integer division rounding half away from zero.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n     if denom == 0 {\n         return Err(MoneyError::DivideByZero { op: \"amort::div\" });\n     }\n     // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:33:5: replace pow_fp -> Result<i128> with Ok(1)",
+    "package": "velt-engine",
+    "replacement": "Ok(1)",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 45
+      },
+      "start": {
+        "column": 5,
+        "line": 33
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace pow_fp -> Result<i128> with Ok(-1)\n@@ -25,29 +25,17 @@\n     })?;\n     product.checked_div(SCALE).ok_or(MoneyError::Overflow {\n         op: \"amort::mul_fp\",\n     })\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n-    let mut result = SCALE;\n-    let mut base = base;\n-    let mut exp = exp;\n-    while exp > 0 {\n-        if exp & 1 == 1 {\n-            result = mul_fp(result, base)?;\n-        }\n-        exp >>= 1;\n-        if exp > 0 {\n-            base = mul_fp(base, base)?;\n-        }\n-    }\n-    Ok(result)\n+    Ok(-1) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Integer division rounding half away from zero.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n     if denom == 0 {\n         return Err(MoneyError::DivideByZero { op: \"amort::div\" });\n     }\n     // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:33:5: replace pow_fp -> Result<i128> with Ok(-1)",
+    "package": "velt-engine",
+    "replacement": "Ok(-1)",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 45
+      },
+      "start": {
+        "column": 5,
+        "line": 33
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace > with == in pow_fp\n@@ -28,17 +28,17 @@\n     })\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n-    while exp > 0 {\n+    while exp == /* ~ changed by cargo-mutants ~ */ 0 {\n         if exp & 1 == 1 {\n             result = mul_fp(result, base)?;\n         }\n         exp >>= 1;\n         if exp > 0 {\n             base = mul_fp(base, base)?;\n         }\n     }\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:36:15: replace > with == in pow_fp",
+    "package": "velt-engine",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 16,
+        "line": 36
+      },
+      "start": {
+        "column": 15,
+        "line": 36
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace > with < in pow_fp\n@@ -28,17 +28,17 @@\n     })\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n-    while exp > 0 {\n+    while exp < /* ~ changed by cargo-mutants ~ */ 0 {\n         if exp & 1 == 1 {\n             result = mul_fp(result, base)?;\n         }\n         exp >>= 1;\n         if exp > 0 {\n             base = mul_fp(base, base)?;\n         }\n     }\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:36:15: replace > with < in pow_fp",
+    "package": "velt-engine",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 16,
+        "line": 36
+      },
+      "start": {
+        "column": 15,
+        "line": 36
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace > with >= in pow_fp\n@@ -28,17 +28,17 @@\n     })\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n-    while exp > 0 {\n+    while exp >= /* ~ changed by cargo-mutants ~ */ 0 {\n         if exp & 1 == 1 {\n             result = mul_fp(result, base)?;\n         }\n         exp >>= 1;\n         if exp > 0 {\n             base = mul_fp(base, base)?;\n         }\n     }\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:36:15: replace > with >= in pow_fp",
+    "package": "velt-engine",
+    "replacement": ">=",
+    "span": {
+      "end": {
+        "column": 16,
+        "line": 36
+      },
+      "start": {
+        "column": 15,
+        "line": 36
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace == with != in pow_fp\n@@ -29,17 +29,17 @@\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n     while exp > 0 {\n-        if exp & 1 == 1 {\n+        if exp & 1 != /* ~ changed by cargo-mutants ~ */ 1 {\n             result = mul_fp(result, base)?;\n         }\n         exp >>= 1;\n         if exp > 0 {\n             base = mul_fp(base, base)?;\n         }\n     }\n     Ok(result)\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:37:20: replace == with != in pow_fp",
+    "package": "velt-engine",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 37
+      },
+      "start": {
+        "column": 20,
+        "line": 37
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace & with | in pow_fp\n@@ -29,17 +29,17 @@\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n     while exp > 0 {\n-        if exp & 1 == 1 {\n+        if exp | /* ~ changed by cargo-mutants ~ */ 1 == 1 {\n             result = mul_fp(result, base)?;\n         }\n         exp >>= 1;\n         if exp > 0 {\n             base = mul_fp(base, base)?;\n         }\n     }\n     Ok(result)\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:37:16: replace & with | in pow_fp",
+    "package": "velt-engine",
+    "replacement": "|",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 37
+      },
+      "start": {
+        "column": 16,
+        "line": 37
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace & with ^ in pow_fp\n@@ -29,17 +29,17 @@\n }\n \n /// Raise a fixed-point base to an integer power by binary exponentiation.\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n     while exp > 0 {\n-        if exp & 1 == 1 {\n+        if exp ^ /* ~ changed by cargo-mutants ~ */ 1 == 1 {\n             result = mul_fp(result, base)?;\n         }\n         exp >>= 1;\n         if exp > 0 {\n             base = mul_fp(base, base)?;\n         }\n     }\n     Ok(result)\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:37:16: replace & with ^ in pow_fp",
+    "package": "velt-engine",
+    "replacement": "^",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 37
+      },
+      "start": {
+        "column": 16,
+        "line": 37
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace >>= with <<= in pow_fp\n@@ -32,17 +32,17 @@\n fn pow_fp(base: i128, exp: u32) -> Result<i128> {\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n     while exp > 0 {\n         if exp & 1 == 1 {\n             result = mul_fp(result, base)?;\n         }\n-        exp >>= 1;\n+        exp <<= /* ~ changed by cargo-mutants ~ */ 1;\n         if exp > 0 {\n             base = mul_fp(base, base)?;\n         }\n     }\n     Ok(result)\n }\n \n /// Integer division rounding half away from zero.\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:40:13: replace >>= with <<= in pow_fp",
+    "package": "velt-engine",
+    "replacement": "<<=",
+    "span": {
+      "end": {
+        "column": 16,
+        "line": 40
+      },
+      "start": {
+        "column": 13,
+        "line": 40
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace > with == in pow_fp\n@@ -33,17 +33,17 @@\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n     while exp > 0 {\n         if exp & 1 == 1 {\n             result = mul_fp(result, base)?;\n         }\n         exp >>= 1;\n-        if exp > 0 {\n+        if exp == /* ~ changed by cargo-mutants ~ */ 0 {\n             base = mul_fp(base, base)?;\n         }\n     }\n     Ok(result)\n }\n \n /// Integer division rounding half away from zero.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:41:16: replace > with == in pow_fp",
+    "package": "velt-engine",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 41
+      },
+      "start": {
+        "column": 16,
+        "line": 41
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace > with < in pow_fp\n@@ -33,17 +33,17 @@\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n     while exp > 0 {\n         if exp & 1 == 1 {\n             result = mul_fp(result, base)?;\n         }\n         exp >>= 1;\n-        if exp > 0 {\n+        if exp < /* ~ changed by cargo-mutants ~ */ 0 {\n             base = mul_fp(base, base)?;\n         }\n     }\n     Ok(result)\n }\n \n /// Integer division rounding half away from zero.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:41:16: replace > with < in pow_fp",
+    "package": "velt-engine",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 41
+      },
+      "start": {
+        "column": 16,
+        "line": 41
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace > with >= in pow_fp\n@@ -33,17 +33,17 @@\n     let mut result = SCALE;\n     let mut base = base;\n     let mut exp = exp;\n     while exp > 0 {\n         if exp & 1 == 1 {\n             result = mul_fp(result, base)?;\n         }\n         exp >>= 1;\n-        if exp > 0 {\n+        if exp >= /* ~ changed by cargo-mutants ~ */ 0 {\n             base = mul_fp(base, base)?;\n         }\n     }\n     Ok(result)\n }\n \n /// Integer division rounding half away from zero.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "pow_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 46
+        },
+        "start": {
+          "column": 1,
+          "line": 31
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:41:16: replace > with >= in pow_fp",
+    "package": "velt-engine",
+    "replacement": ">=",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 41
+      },
+      "start": {
+        "column": 16,
+        "line": 41
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace div_round_half_away -> Result<i128> with Ok(0)\n@@ -42,40 +42,17 @@\n             base = mul_fp(base, base)?;\n         }\n     }\n     Ok(result)\n }\n \n /// Integer division rounding half away from zero.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n-    if denom == 0 {\n-        return Err(MoneyError::DivideByZero { op: \"amort::div\" });\n-    }\n-    // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n-    // and doctrine §5 does not permit a financial path that can panic.\n-    let quot = numer\n-        .checked_div(denom)\n-        .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n-    let rem = numer\n-        .checked_rem(denom)\n-        .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n-    if rem == 0 {\n-        return Ok(quot);\n-    }\n-    let twice = rem\n-        .checked_mul(2)\n-        .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n-    if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n-        quot.checked_add(step)\n-            .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n-    } else {\n-        Ok(quot)\n-    }\n+    Ok(0) /* ~ changed by cargo-mutants ~ */\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n fn monthly_rate_fp(annual: Bps) -> Result<i128> {\n     let numer = i128::from(annual.raw())\n         .checked_mul(SCALE)\n         .ok_or(MoneyError::Overflow {\n             op: \"amort::monthly_rate\",\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:50:5: replace div_round_half_away -> Result<i128> with Ok(0)",
+    "package": "velt-engine",
+    "replacement": "Ok(0)",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 73
+      },
+      "start": {
+        "column": 5,
+        "line": 50
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace div_round_half_away -> Result<i128> with Ok(1)\n@@ -42,40 +42,17 @@\n             base = mul_fp(base, base)?;\n         }\n     }\n     Ok(result)\n }\n \n /// Integer division rounding half away from zero.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n-    if denom == 0 {\n-        return Err(MoneyError::DivideByZero { op: \"amort::div\" });\n-    }\n-    // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n-    // and doctrine §5 does not permit a financial path that can panic.\n-    let quot = numer\n-        .checked_div(denom)\n-        .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n-    let rem = numer\n-        .checked_rem(denom)\n-        .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n-    if rem == 0 {\n-        return Ok(quot);\n-    }\n-    let twice = rem\n-        .checked_mul(2)\n-        .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n-    if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n-        quot.checked_add(step)\n-            .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n-    } else {\n-        Ok(quot)\n-    }\n+    Ok(1) /* ~ changed by cargo-mutants ~ */\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n fn monthly_rate_fp(annual: Bps) -> Result<i128> {\n     let numer = i128::from(annual.raw())\n         .checked_mul(SCALE)\n         .ok_or(MoneyError::Overflow {\n             op: \"amort::monthly_rate\",\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:50:5: replace div_round_half_away -> Result<i128> with Ok(1)",
+    "package": "velt-engine",
+    "replacement": "Ok(1)",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 73
+      },
+      "start": {
+        "column": 5,
+        "line": 50
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace div_round_half_away -> Result<i128> with Ok(-1)\n@@ -42,40 +42,17 @@\n             base = mul_fp(base, base)?;\n         }\n     }\n     Ok(result)\n }\n \n /// Integer division rounding half away from zero.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n-    if denom == 0 {\n-        return Err(MoneyError::DivideByZero { op: \"amort::div\" });\n-    }\n-    // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n-    // and doctrine §5 does not permit a financial path that can panic.\n-    let quot = numer\n-        .checked_div(denom)\n-        .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n-    let rem = numer\n-        .checked_rem(denom)\n-        .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n-    if rem == 0 {\n-        return Ok(quot);\n-    }\n-    let twice = rem\n-        .checked_mul(2)\n-        .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n-    if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n-        quot.checked_add(step)\n-            .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n-    } else {\n-        Ok(quot)\n-    }\n+    Ok(-1) /* ~ changed by cargo-mutants ~ */\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n fn monthly_rate_fp(annual: Bps) -> Result<i128> {\n     let numer = i128::from(annual.raw())\n         .checked_mul(SCALE)\n         .ok_or(MoneyError::Overflow {\n             op: \"amort::monthly_rate\",\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:50:5: replace div_round_half_away -> Result<i128> with Ok(-1)",
+    "package": "velt-engine",
+    "replacement": "Ok(-1)",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 73
+      },
+      "start": {
+        "column": 5,
+        "line": 50
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace == with != in div_round_half_away\n@@ -42,17 +42,17 @@\n             base = mul_fp(base, base)?;\n         }\n     }\n     Ok(result)\n }\n \n /// Integer division rounding half away from zero.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n-    if denom == 0 {\n+    if denom != /* ~ changed by cargo-mutants ~ */ 0 {\n         return Err(MoneyError::DivideByZero { op: \"amort::div\" });\n     }\n     // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n     // and doctrine §5 does not permit a financial path that can panic.\n     let quot = numer\n         .checked_div(denom)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     let rem = numer\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:50:14: replace == with != in div_round_half_away",
+    "package": "velt-engine",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 16,
+        "line": 50
+      },
+      "start": {
+        "column": 14,
+        "line": 50
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace == with != in div_round_half_away\n@@ -53,17 +53,17 @@\n     // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n     // and doctrine §5 does not permit a financial path that can panic.\n     let quot = numer\n         .checked_div(denom)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     let rem = numer\n         .checked_rem(denom)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n-    if rem == 0 {\n+    if rem != /* ~ changed by cargo-mutants ~ */ 0 {\n         return Ok(quot);\n     }\n     let twice = rem\n         .checked_mul(2)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if twice.abs() >= denom.abs() {\n         let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step)\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:61:12: replace == with != in div_round_half_away",
+    "package": "velt-engine",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 14,
+        "line": 61
+      },
+      "start": {
+        "column": 12,
+        "line": 61
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace >= with < in div_round_half_away\n@@ -59,17 +59,17 @@\n         .checked_rem(denom)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem\n         .checked_mul(2)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n-    if twice.abs() >= denom.abs() {\n+    if twice.abs() < /* ~ changed by cargo-mutants ~ */ denom.abs() {\n         let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step)\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:67:20: replace >= with < in div_round_half_away",
+    "package": "velt-engine",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 67
+      },
+      "start": {
+        "column": 20,
+        "line": 67
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace == with != in div_round_half_away\n@@ -60,17 +60,17 @@\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem\n         .checked_mul(2)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer < 0) != /* ~ changed by cargo-mutants ~ */ (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step)\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:68:35: replace == with != in div_round_half_away",
+    "package": "velt-engine",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 37,
+        "line": 68
+      },
+      "start": {
+        "column": 35,
+        "line": 68
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace < with == in div_round_half_away\n@@ -60,17 +60,17 @@\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem\n         .checked_mul(2)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer == /* ~ changed by cargo-mutants ~ */ 0) == (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step)\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:68:30: replace < with == in div_round_half_away",
+    "package": "velt-engine",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 31,
+        "line": 68
+      },
+      "start": {
+        "column": 30,
+        "line": 68
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace < with > in div_round_half_away\n@@ -60,17 +60,17 @@\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem\n         .checked_mul(2)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer > /* ~ changed by cargo-mutants ~ */ 0) == (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step)\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:68:30: replace < with > in div_round_half_away",
+    "package": "velt-engine",
+    "replacement": ">",
+    "span": {
+      "end": {
+        "column": 31,
+        "line": 68
+      },
+      "start": {
+        "column": 30,
+        "line": 68
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace < with <= in div_round_half_away\n@@ -60,17 +60,17 @@\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem\n         .checked_mul(2)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer <= /* ~ changed by cargo-mutants ~ */ 0) == (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step)\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:68:30: replace < with <= in div_round_half_away",
+    "package": "velt-engine",
+    "replacement": "<=",
+    "span": {
+      "end": {
+        "column": 31,
+        "line": 68
+      },
+      "start": {
+        "column": 30,
+        "line": 68
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace < with == in div_round_half_away\n@@ -60,17 +60,17 @@\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem\n         .checked_mul(2)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer < 0) == (denom == /* ~ changed by cargo-mutants ~ */ 0) { 1 } else { -1 };\n         quot.checked_add(step)\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:68:45: replace < with == in div_round_half_away",
+    "package": "velt-engine",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 46,
+        "line": 68
+      },
+      "start": {
+        "column": 45,
+        "line": 68
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace < with > in div_round_half_away\n@@ -60,17 +60,17 @@\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem\n         .checked_mul(2)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer < 0) == (denom > /* ~ changed by cargo-mutants ~ */ 0) { 1 } else { -1 };\n         quot.checked_add(step)\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:68:45: replace < with > in div_round_half_away",
+    "package": "velt-engine",
+    "replacement": ">",
+    "span": {
+      "end": {
+        "column": 46,
+        "line": 68
+      },
+      "start": {
+        "column": 45,
+        "line": 68
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace < with <= in div_round_half_away\n@@ -60,17 +60,17 @@\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem\n         .checked_mul(2)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer < 0) == (denom <= /* ~ changed by cargo-mutants ~ */ 0) { 1 } else { -1 };\n         quot.checked_add(step)\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:68:45: replace < with <= in div_round_half_away",
+    "package": "velt-engine",
+    "replacement": "<=",
+    "span": {
+      "end": {
+        "column": 46,
+        "line": 68
+      },
+      "start": {
+        "column": 45,
+        "line": 68
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ delete - in div_round_half_away\n@@ -60,17 +60,17 @@\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem\n         .checked_mul(2)\n         .ok_or(MoneyError::Overflow { op: \"amort::div\" })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer < 0) == (denom < 0) { 1 } else {  /* ~ changed by cargo-mutants ~ */1 };\n         quot.checked_add(step)\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 74
+        },
+        "start": {
+          "column": 1,
+          "line": 48
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:68:63: delete - in div_round_half_away",
+    "package": "velt-engine",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 64,
+        "line": 68
+      },
+      "start": {
+        "column": 63,
+        "line": 68
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace monthly_rate_fp -> Result<i128> with Ok(0)\n@@ -70,29 +70,17 @@\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n fn monthly_rate_fp(annual: Bps) -> Result<i128> {\n-    let numer = i128::from(annual.raw())\n-        .checked_mul(SCALE)\n-        .ok_or(MoneyError::Overflow {\n-            op: \"amort::monthly_rate\",\n-        })?;\n-    let denom = i128::from(Bps::SCALE)\n-        .checked_mul(i128::from(MONTHS_PER_YEAR))\n-        .ok_or(MoneyError::Overflow {\n-            op: \"amort::monthly_rate\",\n-        })?;\n-    numer.checked_div(denom).ok_or(MoneyError::Overflow {\n-        op: \"amort::monthly_rate\",\n-    })\n+    Ok(0) /* ~ changed by cargo-mutants ~ */\n }\n \n /// The level monthly payment that fully amortizes `principal` over `term_months`\n /// at annual nominal rate `annual_rate`, compounded monthly.\n ///\n /// A zero rate degrades to straight-line principal repayment rather than\n /// dividing by zero.\n ///\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "monthly_rate_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 91
+        },
+        "start": {
+          "column": 1,
+          "line": 76
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:78:5: replace monthly_rate_fp -> Result<i128> with Ok(0)",
+    "package": "velt-engine",
+    "replacement": "Ok(0)",
+    "span": {
+      "end": {
+        "column": 7,
+        "line": 90
+      },
+      "start": {
+        "column": 5,
+        "line": 78
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace monthly_rate_fp -> Result<i128> with Ok(1)\n@@ -70,29 +70,17 @@\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n fn monthly_rate_fp(annual: Bps) -> Result<i128> {\n-    let numer = i128::from(annual.raw())\n-        .checked_mul(SCALE)\n-        .ok_or(MoneyError::Overflow {\n-            op: \"amort::monthly_rate\",\n-        })?;\n-    let denom = i128::from(Bps::SCALE)\n-        .checked_mul(i128::from(MONTHS_PER_YEAR))\n-        .ok_or(MoneyError::Overflow {\n-            op: \"amort::monthly_rate\",\n-        })?;\n-    numer.checked_div(denom).ok_or(MoneyError::Overflow {\n-        op: \"amort::monthly_rate\",\n-    })\n+    Ok(1) /* ~ changed by cargo-mutants ~ */\n }\n \n /// The level monthly payment that fully amortizes `principal` over `term_months`\n /// at annual nominal rate `annual_rate`, compounded monthly.\n ///\n /// A zero rate degrades to straight-line principal repayment rather than\n /// dividing by zero.\n ///\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "monthly_rate_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 91
+        },
+        "start": {
+          "column": 1,
+          "line": 76
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:78:5: replace monthly_rate_fp -> Result<i128> with Ok(1)",
+    "package": "velt-engine",
+    "replacement": "Ok(1)",
+    "span": {
+      "end": {
+        "column": 7,
+        "line": 90
+      },
+      "start": {
+        "column": 5,
+        "line": 78
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace monthly_rate_fp -> Result<i128> with Ok(-1)\n@@ -70,29 +70,17 @@\n             .ok_or(MoneyError::Overflow { op: \"amort::div\" })\n     } else {\n         Ok(quot)\n     }\n }\n \n /// The periodic (monthly) rate as fixed point, from an annual nominal rate.\n fn monthly_rate_fp(annual: Bps) -> Result<i128> {\n-    let numer = i128::from(annual.raw())\n-        .checked_mul(SCALE)\n-        .ok_or(MoneyError::Overflow {\n-            op: \"amort::monthly_rate\",\n-        })?;\n-    let denom = i128::from(Bps::SCALE)\n-        .checked_mul(i128::from(MONTHS_PER_YEAR))\n-        .ok_or(MoneyError::Overflow {\n-            op: \"amort::monthly_rate\",\n-        })?;\n-    numer.checked_div(denom).ok_or(MoneyError::Overflow {\n-        op: \"amort::monthly_rate\",\n-    })\n+    Ok(-1) /* ~ changed by cargo-mutants ~ */\n }\n \n /// The level monthly payment that fully amortizes `principal` over `term_months`\n /// at annual nominal rate `annual_rate`, compounded monthly.\n ///\n /// A zero rate degrades to straight-line principal repayment rather than\n /// dividing by zero.\n ///\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "monthly_rate_fp",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 91
+        },
+        "start": {
+          "column": 1,
+          "line": 76
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:78:5: replace monthly_rate_fp -> Result<i128> with Ok(-1)",
+    "package": "velt-engine",
+    "replacement": "Ok(-1)",
+    "span": {
+      "end": {
+        "column": 7,
+        "line": 90
+      },
+      "start": {
+        "column": 5,
+        "line": 78
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace monthly_payment -> Result<Money> with Ok(Default::default())\n@@ -95,63 +95,17 @@\n ///\n /// A zero rate degrades to straight-line principal repayment rather than\n /// dividing by zero.\n ///\n /// # Errors\n /// [`MoneyError::NonPositive`] if the term is not positive,\n /// [`MoneyError::Overflow`] if the compounding intermediates exceed i128.\n pub fn monthly_payment(principal: Money, annual_rate: Bps, term_months: u32) -> Result<Money> {\n-    if term_months == 0 {\n-        return Err(MoneyError::NonPositive {\n-            field: \"term_months\",\n-            value: 0,\n-        });\n-    }\n-    if principal.is_zero() {\n-        return Ok(Money::zero(principal.currency()));\n-    }\n-\n-    let rate_fp = monthly_rate_fp(annual_rate)?;\n-\n-    // Zero-interest loan: principal spread evenly across the term.\n-    if rate_fp == 0 {\n-        return principal.div_int(i64::from(term_months));\n-    }\n-\n-    let one_plus = SCALE.checked_add(rate_fp).ok_or(MoneyError::Overflow {\n-        op: \"amort::one_plus\",\n-    })?;\n-    let growth = pow_fp(one_plus, term_months)?;\n-    let growth_less_one = growth.checked_sub(SCALE).ok_or(MoneyError::Overflow {\n-        op: \"amort::growth\",\n-    })?;\n-    if growth_less_one <= 0 {\n-        return Err(MoneyError::Overflow {\n-            op: \"amort::growth_underflow\",\n-        });\n-    }\n-\n-    // payment = L * r * (1+r)^n / ((1+r)^n - 1)\n-    // Held in i128 with a single rounding at the end, so the schedule agrees\n-    // with a lender's amortization table to the cent.\n-    let numer = i128::from(principal.minor())\n-        .checked_mul(rate_fp)\n-        .ok_or(MoneyError::Overflow { op: \"amort::numer\" })?\n-        .checked_mul(growth)\n-        .ok_or(MoneyError::Overflow { op: \"amort::numer\" })?;\n-    let denom = SCALE\n-        .checked_mul(growth_less_one)\n-        .ok_or(MoneyError::Overflow { op: \"amort::denom\" })?;\n-\n-    let minor = div_round_half_away(numer, denom)?;\n-    let minor = i64::try_from(minor).map_err(|_| MoneyError::Overflow {\n-        op: \"amort::payment\",\n-    })?;\n-    Ok(Money::from_minor(minor, principal.currency()))\n+    Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Total debt service over twelve months.\n ///\n /// # Errors\n /// As [`monthly_payment`], plus [`MoneyError::Overflow`].\n pub fn annual_debt_service(principal: Money, annual_rate: Bps, term_months: u32) -> Result<Money> {\n     monthly_payment(principal, annual_rate, term_months)?.mul_int(MONTHS_PER_YEAR)\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "monthly_payment",
+      "return_type": "-> Result<Money>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 150
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:103:5: replace monthly_payment -> Result<Money> with Ok(Default::default())",
+    "package": "velt-engine",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 55,
+        "line": 149
+      },
+      "start": {
+        "column": 5,
+        "line": 103
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace == with != in monthly_payment\n@@ -95,17 +95,17 @@\n ///\n /// A zero rate degrades to straight-line principal repayment rather than\n /// dividing by zero.\n ///\n /// # Errors\n /// [`MoneyError::NonPositive`] if the term is not positive,\n /// [`MoneyError::Overflow`] if the compounding intermediates exceed i128.\n pub fn monthly_payment(principal: Money, annual_rate: Bps, term_months: u32) -> Result<Money> {\n-    if term_months == 0 {\n+    if term_months != /* ~ changed by cargo-mutants ~ */ 0 {\n         return Err(MoneyError::NonPositive {\n             field: \"term_months\",\n             value: 0,\n         });\n     }\n     if principal.is_zero() {\n         return Ok(Money::zero(principal.currency()));\n     }\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "monthly_payment",
+      "return_type": "-> Result<Money>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 150
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:103:20: replace == with != in monthly_payment",
+    "package": "velt-engine",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 103
+      },
+      "start": {
+        "column": 20,
+        "line": 103
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace == with != in monthly_payment\n@@ -108,17 +108,17 @@\n     }\n     if principal.is_zero() {\n         return Ok(Money::zero(principal.currency()));\n     }\n \n     let rate_fp = monthly_rate_fp(annual_rate)?;\n \n     // Zero-interest loan: principal spread evenly across the term.\n-    if rate_fp == 0 {\n+    if rate_fp != /* ~ changed by cargo-mutants ~ */ 0 {\n         return principal.div_int(i64::from(term_months));\n     }\n \n     let one_plus = SCALE.checked_add(rate_fp).ok_or(MoneyError::Overflow {\n         op: \"amort::one_plus\",\n     })?;\n     let growth = pow_fp(one_plus, term_months)?;\n     let growth_less_one = growth.checked_sub(SCALE).ok_or(MoneyError::Overflow {\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "monthly_payment",
+      "return_type": "-> Result<Money>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 150
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:116:16: replace == with != in monthly_payment",
+    "package": "velt-engine",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 116
+      },
+      "start": {
+        "column": 16,
+        "line": 116
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace <= with > in monthly_payment\n@@ -119,17 +119,17 @@\n \n     let one_plus = SCALE.checked_add(rate_fp).ok_or(MoneyError::Overflow {\n         op: \"amort::one_plus\",\n     })?;\n     let growth = pow_fp(one_plus, term_months)?;\n     let growth_less_one = growth.checked_sub(SCALE).ok_or(MoneyError::Overflow {\n         op: \"amort::growth\",\n     })?;\n-    if growth_less_one <= 0 {\n+    if growth_less_one > /* ~ changed by cargo-mutants ~ */ 0 {\n         return Err(MoneyError::Overflow {\n             op: \"amort::growth_underflow\",\n         });\n     }\n \n     // payment = L * r * (1+r)^n / ((1+r)^n - 1)\n     // Held in i128 with a single rounding at the end, so the schedule agrees\n     // with a lender's amortization table to the cent.\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "monthly_payment",
+      "return_type": "-> Result<Money>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 150
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:127:24: replace <= with > in monthly_payment",
+    "package": "velt-engine",
+    "replacement": ">",
+    "span": {
+      "end": {
+        "column": 26,
+        "line": 127
+      },
+      "start": {
+        "column": 24,
+        "line": 127
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace annual_debt_service -> Result<Money> with Ok(Default::default())\n@@ -149,17 +149,17 @@\n     Ok(Money::from_minor(minor, principal.currency()))\n }\n \n /// Total debt service over twelve months.\n ///\n /// # Errors\n /// As [`monthly_payment`], plus [`MoneyError::Overflow`].\n pub fn annual_debt_service(principal: Money, annual_rate: Bps, term_months: u32) -> Result<Money> {\n-    monthly_payment(principal, annual_rate, term_months)?.mul_int(MONTHS_PER_YEAR)\n+    Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Remaining balance after `elapsed_months` payments.\n ///\n /// Computed from the closed-form balance rather than by iterating the schedule,\n /// so a 30-year hold is the same cost as a 1-year hold.\n ///\n /// # Errors\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "annual_debt_service",
+      "return_type": "-> Result<Money>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 158
+        },
+        "start": {
+          "column": 1,
+          "line": 152
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:157:5: replace annual_debt_service -> Result<Money> with Ok(Default::default())",
+    "package": "velt-engine",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 83,
+        "line": 157
+      },
+      "start": {
+        "column": 5,
+        "line": 157
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace remaining_balance -> Result<Money> with Ok(Default::default())\n@@ -165,70 +165,17 @@\n /// # Errors\n /// [`MoneyError::Overflow`] or [`MoneyError::NonPositive`].\n pub fn remaining_balance(\n     principal: Money,\n     annual_rate: Bps,\n     term_months: u32,\n     elapsed_months: u32,\n ) -> Result<Money> {\n-    if elapsed_months >= term_months {\n-        return Ok(Money::zero(principal.currency()));\n-    }\n-    let payment = monthly_payment(principal, annual_rate, term_months)?;\n-    let rate_fp = monthly_rate_fp(annual_rate)?;\n-\n-    if rate_fp == 0 {\n-        let paid = payment.mul_int(i64::from(elapsed_months))?;\n-        return principal.sub(paid);\n-    }\n-\n-    let one_plus = SCALE.checked_add(rate_fp).ok_or(MoneyError::Overflow {\n-        op: \"amort::one_plus\",\n-    })?;\n-    let growth = pow_fp(one_plus, elapsed_months)?;\n-    let growth_less_one = growth.checked_sub(SCALE).ok_or(MoneyError::Overflow {\n-        op: \"amort::balance\",\n-    })?;\n-\n-    // balance = L*(1+r)^k - P*((1+r)^k - 1)/r\n-    //\n-    // Both terms are put over the common denominator SCALE*r and rounded once.\n-    // Rounding each term separately admits +/-1 cent of error, which is exactly\n-    // the kind of quiet drift doctrine §2 calls worse than useless.\n-    let grown = i128::from(principal.minor())\n-        .checked_mul(growth)\n-        .ok_or(MoneyError::Overflow {\n-            op: \"amort::balance\",\n-        })?\n-        .checked_mul(rate_fp)\n-        .ok_or(MoneyError::Overflow {\n-            op: \"amort::balance\",\n-        })?;\n-    let repaid = i128::from(payment.minor())\n-        .checked_mul(growth_less_one)\n-        .ok_or(MoneyError::Overflow {\n-            op: \"amort::balance\",\n-        })?\n-        .checked_mul(SCALE)\n-        .ok_or(MoneyError::Overflow {\n-            op: \"amort::balance\",\n-        })?;\n-    let numer = grown.checked_sub(repaid).ok_or(MoneyError::Overflow {\n-        op: \"amort::balance\",\n-    })?;\n-    let denom = SCALE.checked_mul(rate_fp).ok_or(MoneyError::Overflow {\n-        op: \"amort::balance\",\n-    })?;\n-\n-    let minor = div_round_half_away(numer, denom)?;\n-    let minor = i64::try_from(minor).map_err(|_| MoneyError::Overflow {\n-        op: \"amort::balance\",\n-    })?;\n-    Ok(Money::from_minor(minor.max(0), principal.currency()))\n+    Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Loan principal implied by a purchase price and a down payment rate.\n ///\n /// # Errors\n /// [`MoneyError::Overflow`].\n pub fn principal_from_ltv(price: Money, down_payment_rate: Bps) -> Result<Money> {\n     let down = price.apply(down_payment_rate)?;\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "remaining_balance",
+      "return_type": "-> Result<Money>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 227
+        },
+        "start": {
+          "column": 1,
+          "line": 160
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:173:5: replace remaining_balance -> Result<Money> with Ok(Default::default())",
+    "package": "velt-engine",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 62,
+        "line": 226
+      },
+      "start": {
+        "column": 5,
+        "line": 173
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace >= with < in remaining_balance\n@@ -165,17 +165,17 @@\n /// # Errors\n /// [`MoneyError::Overflow`] or [`MoneyError::NonPositive`].\n pub fn remaining_balance(\n     principal: Money,\n     annual_rate: Bps,\n     term_months: u32,\n     elapsed_months: u32,\n ) -> Result<Money> {\n-    if elapsed_months >= term_months {\n+    if elapsed_months < /* ~ changed by cargo-mutants ~ */ term_months {\n         return Ok(Money::zero(principal.currency()));\n     }\n     let payment = monthly_payment(principal, annual_rate, term_months)?;\n     let rate_fp = monthly_rate_fp(annual_rate)?;\n \n     if rate_fp == 0 {\n         let paid = payment.mul_int(i64::from(elapsed_months))?;\n         return principal.sub(paid);\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "remaining_balance",
+      "return_type": "-> Result<Money>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 227
+        },
+        "start": {
+          "column": 1,
+          "line": 160
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:173:23: replace >= with < in remaining_balance",
+    "package": "velt-engine",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 25,
+        "line": 173
+      },
+      "start": {
+        "column": 23,
+        "line": 173
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace == with != in remaining_balance\n@@ -171,17 +171,17 @@\n     elapsed_months: u32,\n ) -> Result<Money> {\n     if elapsed_months >= term_months {\n         return Ok(Money::zero(principal.currency()));\n     }\n     let payment = monthly_payment(principal, annual_rate, term_months)?;\n     let rate_fp = monthly_rate_fp(annual_rate)?;\n \n-    if rate_fp == 0 {\n+    if rate_fp != /* ~ changed by cargo-mutants ~ */ 0 {\n         let paid = payment.mul_int(i64::from(elapsed_months))?;\n         return principal.sub(paid);\n     }\n \n     let one_plus = SCALE.checked_add(rate_fp).ok_or(MoneyError::Overflow {\n         op: \"amort::one_plus\",\n     })?;\n     let growth = pow_fp(one_plus, elapsed_months)?;\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "remaining_balance",
+      "return_type": "-> Result<Money>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 227
+        },
+        "start": {
+          "column": 1,
+          "line": 160
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-engine/src/amort.rs:179:16: replace == with != in remaining_balance",
+    "package": "velt-engine",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 179
+      },
+      "start": {
+        "column": 16,
+        "line": 179
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace principal_from_ltv -> Result<Money> with Ok(Default::default())\n@@ -226,18 +226,17 @@\n     Ok(Money::from_minor(minor.max(0), principal.currency()))\n }\n \n /// Loan principal implied by a purchase price and a down payment rate.\n ///\n /// # Errors\n /// [`MoneyError::Overflow`].\n pub fn principal_from_ltv(price: Money, down_payment_rate: Bps) -> Result<Money> {\n-    let down = price.apply(down_payment_rate)?;\n-    price.sub(down)\n+    Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Convenience: USD zero.\n #[must_use]\n pub const fn usd_zero() -> Money {\n     Money::zero(Currency::Usd)\n }\n \n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "principal_from_ltv",
+      "return_type": "-> Result<Money>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 236
+        },
+        "start": {
+          "column": 1,
+          "line": 229
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:234:5: replace principal_from_ltv -> Result<Money> with Ok(Default::default())",
+    "package": "velt-engine",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 20,
+        "line": 235
+      },
+      "start": {
+        "column": 5,
+        "line": 234
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-engine/src/amort.rs\n+++ replace usd_zero -> Money with Default::default()\n@@ -233,17 +233,17 @@\n pub fn principal_from_ltv(price: Money, down_payment_rate: Bps) -> Result<Money> {\n     let down = price.apply(down_payment_rate)?;\n     price.sub(down)\n }\n \n /// Convenience: USD zero.\n #[must_use]\n pub const fn usd_zero() -> Money {\n-    Money::zero(Currency::Usd)\n+    Default::default() /* ~ changed by cargo-mutants ~ */\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n     fn usd(minor: i64) -> Money {\n         Money::from_minor(minor, Currency::Usd)\n",
+    "file": "crates/velt-engine/src/amort.rs",
+    "function": {
+      "function_name": "usd_zero",
+      "return_type": "-> Money",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 242
+        },
+        "start": {
+          "column": 1,
+          "line": 238
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-engine/src/amort.rs:241:5: replace usd_zero -> Money with Default::default()",
+    "package": "velt-engine",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 31,
+        "line": 241
+      },
+      "start": {
+        "column": 5,
+        "line": 241
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Currency::exponent -> u32 with 0\n@@ -74,19 +74,17 @@\n impl Currency {\n     /// Number of decimal places in the currency's normal written form.\n     ///\n     /// All currencies currently supported are 2-exponent; the method exists so\n     /// that adding a 0-exponent currency (JPY) or 3-exponent (KWD) is a data\n     /// change rather than an audit of every call site.\n     #[must_use]\n     pub const fn exponent(self) -> u32 {\n-        match self {\n-            Self::Usd | Self::Eur | Self::Gbp | Self::Cad | Self::Mxn => 2,\n-        }\n+        0 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Number of minor units in one major unit (100 for a 2-exponent currency).\n     #[must_use]\n     pub const fn minor_units_per_major(self) -> i64 {\n         match self.exponent() {\n             0 => 1,\n             1 => 10,\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Currency::exponent",
+      "return_type": "-> u32",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 85
+        },
+        "start": {
+          "column": 5,
+          "line": 75
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:82:9: replace Currency::exponent -> u32 with 0",
+    "package": "velt-money",
+    "replacement": "0",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 84
+      },
+      "start": {
+        "column": 9,
+        "line": 82
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Currency::exponent -> u32 with 1\n@@ -74,19 +74,17 @@\n impl Currency {\n     /// Number of decimal places in the currency's normal written form.\n     ///\n     /// All currencies currently supported are 2-exponent; the method exists so\n     /// that adding a 0-exponent currency (JPY) or 3-exponent (KWD) is a data\n     /// change rather than an audit of every call site.\n     #[must_use]\n     pub const fn exponent(self) -> u32 {\n-        match self {\n-            Self::Usd | Self::Eur | Self::Gbp | Self::Cad | Self::Mxn => 2,\n-        }\n+        1 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Number of minor units in one major unit (100 for a 2-exponent currency).\n     #[must_use]\n     pub const fn minor_units_per_major(self) -> i64 {\n         match self.exponent() {\n             0 => 1,\n             1 => 10,\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Currency::exponent",
+      "return_type": "-> u32",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 85
+        },
+        "start": {
+          "column": 5,
+          "line": 75
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:82:9: replace Currency::exponent -> u32 with 1",
+    "package": "velt-money",
+    "replacement": "1",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 84
+      },
+      "start": {
+        "column": 9,
+        "line": 82
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Currency::minor_units_per_major -> i64 with 0\n@@ -82,23 +82,17 @@\n         match self {\n             Self::Usd | Self::Eur | Self::Gbp | Self::Cad | Self::Mxn => 2,\n         }\n     }\n \n     /// Number of minor units in one major unit (100 for a 2-exponent currency).\n     #[must_use]\n     pub const fn minor_units_per_major(self) -> i64 {\n-        match self.exponent() {\n-            0 => 1,\n-            1 => 10,\n-            2 => 100,\n-            3 => 1_000,\n-            _ => 1_000,\n-        }\n+        0 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// ISO-4217 alphabetic code.\n     #[must_use]\n     pub const fn code(self) -> &'static str {\n         match self {\n             Self::Usd => \"USD\",\n             Self::Eur => \"EUR\",\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Currency::minor_units_per_major",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 97
+        },
+        "start": {
+          "column": 5,
+          "line": 87
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:90:9: replace Currency::minor_units_per_major -> i64 with 0",
+    "package": "velt-money",
+    "replacement": "0",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 96
+      },
+      "start": {
+        "column": 9,
+        "line": 90
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Currency::minor_units_per_major -> i64 with 1\n@@ -82,23 +82,17 @@\n         match self {\n             Self::Usd | Self::Eur | Self::Gbp | Self::Cad | Self::Mxn => 2,\n         }\n     }\n \n     /// Number of minor units in one major unit (100 for a 2-exponent currency).\n     #[must_use]\n     pub const fn minor_units_per_major(self) -> i64 {\n-        match self.exponent() {\n-            0 => 1,\n-            1 => 10,\n-            2 => 100,\n-            3 => 1_000,\n-            _ => 1_000,\n-        }\n+        1 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// ISO-4217 alphabetic code.\n     #[must_use]\n     pub const fn code(self) -> &'static str {\n         match self {\n             Self::Usd => \"USD\",\n             Self::Eur => \"EUR\",\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Currency::minor_units_per_major",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 97
+        },
+        "start": {
+          "column": 5,
+          "line": 87
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:90:9: replace Currency::minor_units_per_major -> i64 with 1",
+    "package": "velt-money",
+    "replacement": "1",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 96
+      },
+      "start": {
+        "column": 9,
+        "line": 90
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Currency::minor_units_per_major -> i64 with -1\n@@ -82,23 +82,17 @@\n         match self {\n             Self::Usd | Self::Eur | Self::Gbp | Self::Cad | Self::Mxn => 2,\n         }\n     }\n \n     /// Number of minor units in one major unit (100 for a 2-exponent currency).\n     #[must_use]\n     pub const fn minor_units_per_major(self) -> i64 {\n-        match self.exponent() {\n-            0 => 1,\n-            1 => 10,\n-            2 => 100,\n-            3 => 1_000,\n-            _ => 1_000,\n-        }\n+        -1 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// ISO-4217 alphabetic code.\n     #[must_use]\n     pub const fn code(self) -> &'static str {\n         match self {\n             Self::Usd => \"USD\",\n             Self::Eur => \"EUR\",\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Currency::minor_units_per_major",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 97
+        },
+        "start": {
+          "column": 5,
+          "line": 87
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:90:9: replace Currency::minor_units_per_major -> i64 with -1",
+    "package": "velt-money",
+    "replacement": "-1",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 96
+      },
+      "start": {
+        "column": 9,
+        "line": 90
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ delete match arm 0 in Currency::minor_units_per_major\n@@ -83,17 +83,17 @@\n             Self::Usd | Self::Eur | Self::Gbp | Self::Cad | Self::Mxn => 2,\n         }\n     }\n \n     /// Number of minor units in one major unit (100 for a 2-exponent currency).\n     #[must_use]\n     pub const fn minor_units_per_major(self) -> i64 {\n         match self.exponent() {\n-            0 => 1,\n+             /* ~ changed by cargo-mutants ~ */\n             1 => 10,\n             2 => 100,\n             3 => 1_000,\n             _ => 1_000,\n         }\n     }\n \n     /// ISO-4217 alphabetic code.\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Currency::minor_units_per_major",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 97
+        },
+        "start": {
+          "column": 5,
+          "line": 87
+        }
+      }
+    },
+    "genre": "MatchArm",
+    "name": "crates/velt-money/src/lib.rs:91:13: delete match arm 0 in Currency::minor_units_per_major",
+    "package": "velt-money",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 20,
+        "line": 91
+      },
+      "start": {
+        "column": 13,
+        "line": 91
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ delete match arm 1 in Currency::minor_units_per_major\n@@ -84,17 +84,17 @@\n         }\n     }\n \n     /// Number of minor units in one major unit (100 for a 2-exponent currency).\n     #[must_use]\n     pub const fn minor_units_per_major(self) -> i64 {\n         match self.exponent() {\n             0 => 1,\n-            1 => 10,\n+             /* ~ changed by cargo-mutants ~ */\n             2 => 100,\n             3 => 1_000,\n             _ => 1_000,\n         }\n     }\n \n     /// ISO-4217 alphabetic code.\n     #[must_use]\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Currency::minor_units_per_major",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 97
+        },
+        "start": {
+          "column": 5,
+          "line": 87
+        }
+      }
+    },
+    "genre": "MatchArm",
+    "name": "crates/velt-money/src/lib.rs:92:13: delete match arm 1 in Currency::minor_units_per_major",
+    "package": "velt-money",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 92
+      },
+      "start": {
+        "column": 13,
+        "line": 92
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ delete match arm 2 in Currency::minor_units_per_major\n@@ -85,17 +85,17 @@\n     }\n \n     /// Number of minor units in one major unit (100 for a 2-exponent currency).\n     #[must_use]\n     pub const fn minor_units_per_major(self) -> i64 {\n         match self.exponent() {\n             0 => 1,\n             1 => 10,\n-            2 => 100,\n+             /* ~ changed by cargo-mutants ~ */\n             3 => 1_000,\n             _ => 1_000,\n         }\n     }\n \n     /// ISO-4217 alphabetic code.\n     #[must_use]\n     pub const fn code(self) -> &'static str {\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Currency::minor_units_per_major",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 97
+        },
+        "start": {
+          "column": 5,
+          "line": 87
+        }
+      }
+    },
+    "genre": "MatchArm",
+    "name": "crates/velt-money/src/lib.rs:93:13: delete match arm 2 in Currency::minor_units_per_major",
+    "package": "velt-money",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 93
+      },
+      "start": {
+        "column": 13,
+        "line": 93
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ delete match arm 3 in Currency::minor_units_per_major\n@@ -86,17 +86,17 @@\n \n     /// Number of minor units in one major unit (100 for a 2-exponent currency).\n     #[must_use]\n     pub const fn minor_units_per_major(self) -> i64 {\n         match self.exponent() {\n             0 => 1,\n             1 => 10,\n             2 => 100,\n-            3 => 1_000,\n+             /* ~ changed by cargo-mutants ~ */\n             _ => 1_000,\n         }\n     }\n \n     /// ISO-4217 alphabetic code.\n     #[must_use]\n     pub const fn code(self) -> &'static str {\n         match self {\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Currency::minor_units_per_major",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 97
+        },
+        "start": {
+          "column": 5,
+          "line": 87
+        }
+      }
+    },
+    "genre": "MatchArm",
+    "name": "crates/velt-money/src/lib.rs:94:13: delete match arm 3 in Currency::minor_units_per_major",
+    "package": "velt-money",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 24,
+        "line": 94
+      },
+      "start": {
+        "column": 13,
+        "line": 94
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Currency::code -> &'static str with \"\"\n@@ -94,23 +94,17 @@\n             3 => 1_000,\n             _ => 1_000,\n         }\n     }\n \n     /// ISO-4217 alphabetic code.\n     #[must_use]\n     pub const fn code(self) -> &'static str {\n-        match self {\n-            Self::Usd => \"USD\",\n-            Self::Eur => \"EUR\",\n-            Self::Gbp => \"GBP\",\n-            Self::Cad => \"CAD\",\n-            Self::Mxn => \"MXN\",\n-        }\n+        \"\" /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n impl fmt::Display for Currency {\n     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n         f.write_str(self.code())\n     }\n }\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Currency::code",
+      "return_type": "-> &'static str",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 109
+        },
+        "start": {
+          "column": 5,
+          "line": 99
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:102:9: replace Currency::code -> &'static str with \"\"",
+    "package": "velt-money",
+    "replacement": "\"\"",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 108
+      },
+      "start": {
+        "column": 9,
+        "line": 102
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Currency::code -> &'static str with \"xyzzy\"\n@@ -94,23 +94,17 @@\n             3 => 1_000,\n             _ => 1_000,\n         }\n     }\n \n     /// ISO-4217 alphabetic code.\n     #[must_use]\n     pub const fn code(self) -> &'static str {\n-        match self {\n-            Self::Usd => \"USD\",\n-            Self::Eur => \"EUR\",\n-            Self::Gbp => \"GBP\",\n-            Self::Cad => \"CAD\",\n-            Self::Mxn => \"MXN\",\n-        }\n+        \"xyzzy\" /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n impl fmt::Display for Currency {\n     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n         f.write_str(self.code())\n     }\n }\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Currency::code",
+      "return_type": "-> &'static str",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 109
+        },
+        "start": {
+          "column": 5,
+          "line": 99
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:102:9: replace Currency::code -> &'static str with \"xyzzy\"",
+    "package": "velt-money",
+    "replacement": "\"xyzzy\"",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 108
+      },
+      "start": {
+        "column": 9,
+        "line": 102
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::from_minor -> Self with Default::default()\n@@ -127,17 +127,17 @@\n     /// Currency of this amount.\n     currency: Currency,\n }\n \n impl Money {\n     /// Construct from minor units (cents).\n     #[must_use]\n     pub const fn from_minor(minor: i64, currency: Currency) -> Self {\n-        Self { minor, currency }\n+        Default::default() /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Construct from whole major units (dollars).\n     ///\n     /// # Errors\n     /// Returns [`MoneyError::Overflow`] if the amount does not fit in `i64`\n     /// minor units.\n     pub fn from_major(major: i64, currency: Currency) -> Result<Self> {\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::from_minor",
+      "return_type": "-> Self",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 136
+        },
+        "start": {
+          "column": 5,
+          "line": 132
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:135:9: replace Money::from_minor -> Self with Default::default()",
+    "package": "velt-money",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 33,
+        "line": 135
+      },
+      "start": {
+        "column": 9,
+        "line": 135
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::from_major -> Result<Self> with Ok(Default::default())\n@@ -136,20 +136,17 @@\n     }\n \n     /// Construct from whole major units (dollars).\n     ///\n     /// # Errors\n     /// Returns [`MoneyError::Overflow`] if the amount does not fit in `i64`\n     /// minor units.\n     pub fn from_major(major: i64, currency: Currency) -> Result<Self> {\n-        let minor = major\n-            .checked_mul(currency.minor_units_per_major())\n-            .ok_or(MoneyError::Overflow { op: \"from_major\" })?;\n-        Ok(Self { minor, currency })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Zero in the given currency.\n     #[must_use]\n     pub const fn zero(currency: Currency) -> Self {\n         Self { minor: 0, currency }\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::from_major",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 148
+        },
+        "start": {
+          "column": 5,
+          "line": 138
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:144:9: replace Money::from_major -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 37,
+        "line": 147
+      },
+      "start": {
+        "column": 9,
+        "line": 144
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::zero -> Self with Default::default()\n@@ -145,17 +145,17 @@\n             .checked_mul(currency.minor_units_per_major())\n             .ok_or(MoneyError::Overflow { op: \"from_major\" })?;\n         Ok(Self { minor, currency })\n     }\n \n     /// Zero in the given currency.\n     #[must_use]\n     pub const fn zero(currency: Currency) -> Self {\n-        Self { minor: 0, currency }\n+        Default::default() /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// The raw minor-unit amount.\n     #[must_use]\n     pub const fn minor(self) -> i64 {\n         self.minor\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::zero",
+      "return_type": "-> Self",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 154
+        },
+        "start": {
+          "column": 5,
+          "line": 150
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:153:9: replace Money::zero -> Self with Default::default()",
+    "package": "velt-money",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 36,
+        "line": 153
+      },
+      "start": {
+        "column": 9,
+        "line": 153
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::minor -> i64 with 0\n@@ -151,17 +151,17 @@\n     #[must_use]\n     pub const fn zero(currency: Currency) -> Self {\n         Self { minor: 0, currency }\n     }\n \n     /// The raw minor-unit amount.\n     #[must_use]\n     pub const fn minor(self) -> i64 {\n-        self.minor\n+        0 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// The currency tag.\n     #[must_use]\n     pub const fn currency(self) -> Currency {\n         self.currency\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::minor",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 160
+        },
+        "start": {
+          "column": 5,
+          "line": 156
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:159:9: replace Money::minor -> i64 with 0",
+    "package": "velt-money",
+    "replacement": "0",
+    "span": {
+      "end": {
+        "column": 19,
+        "line": 159
+      },
+      "start": {
+        "column": 9,
+        "line": 159
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::minor -> i64 with 1\n@@ -151,17 +151,17 @@\n     #[must_use]\n     pub const fn zero(currency: Currency) -> Self {\n         Self { minor: 0, currency }\n     }\n \n     /// The raw minor-unit amount.\n     #[must_use]\n     pub const fn minor(self) -> i64 {\n-        self.minor\n+        1 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// The currency tag.\n     #[must_use]\n     pub const fn currency(self) -> Currency {\n         self.currency\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::minor",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 160
+        },
+        "start": {
+          "column": 5,
+          "line": 156
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:159:9: replace Money::minor -> i64 with 1",
+    "package": "velt-money",
+    "replacement": "1",
+    "span": {
+      "end": {
+        "column": 19,
+        "line": 159
+      },
+      "start": {
+        "column": 9,
+        "line": 159
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::minor -> i64 with -1\n@@ -151,17 +151,17 @@\n     #[must_use]\n     pub const fn zero(currency: Currency) -> Self {\n         Self { minor: 0, currency }\n     }\n \n     /// The raw minor-unit amount.\n     #[must_use]\n     pub const fn minor(self) -> i64 {\n-        self.minor\n+        -1 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// The currency tag.\n     #[must_use]\n     pub const fn currency(self) -> Currency {\n         self.currency\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::minor",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 160
+        },
+        "start": {
+          "column": 5,
+          "line": 156
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:159:9: replace Money::minor -> i64 with -1",
+    "package": "velt-money",
+    "replacement": "-1",
+    "span": {
+      "end": {
+        "column": 19,
+        "line": 159
+      },
+      "start": {
+        "column": 9,
+        "line": 159
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::currency -> Currency with Default::default()\n@@ -157,17 +157,17 @@\n     #[must_use]\n     pub const fn minor(self) -> i64 {\n         self.minor\n     }\n \n     /// The currency tag.\n     #[must_use]\n     pub const fn currency(self) -> Currency {\n-        self.currency\n+        Default::default() /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// True if the amount is exactly zero.\n     #[must_use]\n     pub const fn is_zero(self) -> bool {\n         self.minor == 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::currency",
+      "return_type": "-> Currency",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 166
+        },
+        "start": {
+          "column": 5,
+          "line": 162
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:165:9: replace Money::currency -> Currency with Default::default()",
+    "package": "velt-money",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 165
+      },
+      "start": {
+        "column": 9,
+        "line": 165
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::is_zero -> bool with true\n@@ -163,17 +163,17 @@\n     #[must_use]\n     pub const fn currency(self) -> Currency {\n         self.currency\n     }\n \n     /// True if the amount is exactly zero.\n     #[must_use]\n     pub const fn is_zero(self) -> bool {\n-        self.minor == 0\n+        true /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// True if the amount is strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n         self.minor > 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_zero",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 172
+        },
+        "start": {
+          "column": 5,
+          "line": 168
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:171:9: replace Money::is_zero -> bool with true",
+    "package": "velt-money",
+    "replacement": "true",
+    "span": {
+      "end": {
+        "column": 24,
+        "line": 171
+      },
+      "start": {
+        "column": 9,
+        "line": 171
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::is_zero -> bool with false\n@@ -163,17 +163,17 @@\n     #[must_use]\n     pub const fn currency(self) -> Currency {\n         self.currency\n     }\n \n     /// True if the amount is exactly zero.\n     #[must_use]\n     pub const fn is_zero(self) -> bool {\n-        self.minor == 0\n+        false /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// True if the amount is strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n         self.minor > 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_zero",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 172
+        },
+        "start": {
+          "column": 5,
+          "line": 168
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:171:9: replace Money::is_zero -> bool with false",
+    "package": "velt-money",
+    "replacement": "false",
+    "span": {
+      "end": {
+        "column": 24,
+        "line": 171
+      },
+      "start": {
+        "column": 9,
+        "line": 171
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace == with != in Money::is_zero\n@@ -163,17 +163,17 @@\n     #[must_use]\n     pub const fn currency(self) -> Currency {\n         self.currency\n     }\n \n     /// True if the amount is exactly zero.\n     #[must_use]\n     pub const fn is_zero(self) -> bool {\n-        self.minor == 0\n+        self.minor != /* ~ changed by cargo-mutants ~ */ 0\n     }\n \n     /// True if the amount is strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n         self.minor > 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_zero",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 172
+        },
+        "start": {
+          "column": 5,
+          "line": 168
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:171:20: replace == with != in Money::is_zero",
+    "package": "velt-money",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 171
+      },
+      "start": {
+        "column": 20,
+        "line": 171
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::is_positive -> bool with true\n@@ -169,17 +169,17 @@\n     #[must_use]\n     pub const fn is_zero(self) -> bool {\n         self.minor == 0\n     }\n \n     /// True if the amount is strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n-        self.minor > 0\n+        true /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n         self.minor < 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_positive",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 178
+        },
+        "start": {
+          "column": 5,
+          "line": 174
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:177:9: replace Money::is_positive -> bool with true",
+    "package": "velt-money",
+    "replacement": "true",
+    "span": {
+      "end": {
+        "column": 23,
+        "line": 177
+      },
+      "start": {
+        "column": 9,
+        "line": 177
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::is_positive -> bool with false\n@@ -169,17 +169,17 @@\n     #[must_use]\n     pub const fn is_zero(self) -> bool {\n         self.minor == 0\n     }\n \n     /// True if the amount is strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n-        self.minor > 0\n+        false /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n         self.minor < 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_positive",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 178
+        },
+        "start": {
+          "column": 5,
+          "line": 174
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:177:9: replace Money::is_positive -> bool with false",
+    "package": "velt-money",
+    "replacement": "false",
+    "span": {
+      "end": {
+        "column": 23,
+        "line": 177
+      },
+      "start": {
+        "column": 9,
+        "line": 177
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace > with == in Money::is_positive\n@@ -169,17 +169,17 @@\n     #[must_use]\n     pub const fn is_zero(self) -> bool {\n         self.minor == 0\n     }\n \n     /// True if the amount is strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n-        self.minor > 0\n+        self.minor == /* ~ changed by cargo-mutants ~ */ 0\n     }\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n         self.minor < 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_positive",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 178
+        },
+        "start": {
+          "column": 5,
+          "line": 174
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:177:20: replace > with == in Money::is_positive",
+    "package": "velt-money",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 177
+      },
+      "start": {
+        "column": 20,
+        "line": 177
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace > with < in Money::is_positive\n@@ -169,17 +169,17 @@\n     #[must_use]\n     pub const fn is_zero(self) -> bool {\n         self.minor == 0\n     }\n \n     /// True if the amount is strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n-        self.minor > 0\n+        self.minor < /* ~ changed by cargo-mutants ~ */ 0\n     }\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n         self.minor < 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_positive",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 178
+        },
+        "start": {
+          "column": 5,
+          "line": 174
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:177:20: replace > with < in Money::is_positive",
+    "package": "velt-money",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 177
+      },
+      "start": {
+        "column": 20,
+        "line": 177
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace > with >= in Money::is_positive\n@@ -169,17 +169,17 @@\n     #[must_use]\n     pub const fn is_zero(self) -> bool {\n         self.minor == 0\n     }\n \n     /// True if the amount is strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n-        self.minor > 0\n+        self.minor >= /* ~ changed by cargo-mutants ~ */ 0\n     }\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n         self.minor < 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_positive",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 178
+        },
+        "start": {
+          "column": 5,
+          "line": 174
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:177:20: replace > with >= in Money::is_positive",
+    "package": "velt-money",
+    "replacement": ">=",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 177
+      },
+      "start": {
+        "column": 20,
+        "line": 177
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::is_negative -> bool with true\n@@ -175,17 +175,17 @@\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n         self.minor > 0\n     }\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n-        self.minor < 0\n+        true /* ~ changed by cargo-mutants ~ */\n     }\n \n     fn same_currency(self, rhs: Self) -> Result<()> {\n         if self.currency == rhs.currency {\n             Ok(())\n         } else {\n             Err(MoneyError::CurrencyMismatch {\n                 lhs: self.currency,\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_negative",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 184
+        },
+        "start": {
+          "column": 5,
+          "line": 180
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:183:9: replace Money::is_negative -> bool with true",
+    "package": "velt-money",
+    "replacement": "true",
+    "span": {
+      "end": {
+        "column": 23,
+        "line": 183
+      },
+      "start": {
+        "column": 9,
+        "line": 183
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::is_negative -> bool with false\n@@ -175,17 +175,17 @@\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n         self.minor > 0\n     }\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n-        self.minor < 0\n+        false /* ~ changed by cargo-mutants ~ */\n     }\n \n     fn same_currency(self, rhs: Self) -> Result<()> {\n         if self.currency == rhs.currency {\n             Ok(())\n         } else {\n             Err(MoneyError::CurrencyMismatch {\n                 lhs: self.currency,\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_negative",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 184
+        },
+        "start": {
+          "column": 5,
+          "line": 180
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:183:9: replace Money::is_negative -> bool with false",
+    "package": "velt-money",
+    "replacement": "false",
+    "span": {
+      "end": {
+        "column": 23,
+        "line": 183
+      },
+      "start": {
+        "column": 9,
+        "line": 183
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace < with == in Money::is_negative\n@@ -175,17 +175,17 @@\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n         self.minor > 0\n     }\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n-        self.minor < 0\n+        self.minor == /* ~ changed by cargo-mutants ~ */ 0\n     }\n \n     fn same_currency(self, rhs: Self) -> Result<()> {\n         if self.currency == rhs.currency {\n             Ok(())\n         } else {\n             Err(MoneyError::CurrencyMismatch {\n                 lhs: self.currency,\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_negative",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 184
+        },
+        "start": {
+          "column": 5,
+          "line": 180
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:183:20: replace < with == in Money::is_negative",
+    "package": "velt-money",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 183
+      },
+      "start": {
+        "column": 20,
+        "line": 183
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace < with > in Money::is_negative\n@@ -175,17 +175,17 @@\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n         self.minor > 0\n     }\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n-        self.minor < 0\n+        self.minor > /* ~ changed by cargo-mutants ~ */ 0\n     }\n \n     fn same_currency(self, rhs: Self) -> Result<()> {\n         if self.currency == rhs.currency {\n             Ok(())\n         } else {\n             Err(MoneyError::CurrencyMismatch {\n                 lhs: self.currency,\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_negative",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 184
+        },
+        "start": {
+          "column": 5,
+          "line": 180
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:183:20: replace < with > in Money::is_negative",
+    "package": "velt-money",
+    "replacement": ">",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 183
+      },
+      "start": {
+        "column": 20,
+        "line": 183
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace < with <= in Money::is_negative\n@@ -175,17 +175,17 @@\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n         self.minor > 0\n     }\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n-        self.minor < 0\n+        self.minor <= /* ~ changed by cargo-mutants ~ */ 0\n     }\n \n     fn same_currency(self, rhs: Self) -> Result<()> {\n         if self.currency == rhs.currency {\n             Ok(())\n         } else {\n             Err(MoneyError::CurrencyMismatch {\n                 lhs: self.currency,\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::is_negative",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 184
+        },
+        "start": {
+          "column": 5,
+          "line": 180
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:183:20: replace < with <= in Money::is_negative",
+    "package": "velt-money",
+    "replacement": "<=",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 183
+      },
+      "start": {
+        "column": 20,
+        "line": 183
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::same_currency -> Result<()> with Ok(())\n@@ -179,24 +179,17 @@\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n         self.minor < 0\n     }\n \n     fn same_currency(self, rhs: Self) -> Result<()> {\n-        if self.currency == rhs.currency {\n-            Ok(())\n-        } else {\n-            Err(MoneyError::CurrencyMismatch {\n-                lhs: self.currency,\n-                rhs: rhs.currency,\n-            })\n-        }\n+        Ok(()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Checked addition. Currencies must match.\n     ///\n     /// # Errors\n     /// [`MoneyError::CurrencyMismatch`] or [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::same_currency",
+      "return_type": "-> Result<()>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 195
+        },
+        "start": {
+          "column": 5,
+          "line": 186
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:187:9: replace Money::same_currency -> Result<()> with Ok(())",
+    "package": "velt-money",
+    "replacement": "Ok(())",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 194
+      },
+      "start": {
+        "column": 9,
+        "line": 187
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace == with != in Money::same_currency\n@@ -179,17 +179,17 @@\n \n     /// True if the amount is strictly less than zero.\n     #[must_use]\n     pub const fn is_negative(self) -> bool {\n         self.minor < 0\n     }\n \n     fn same_currency(self, rhs: Self) -> Result<()> {\n-        if self.currency == rhs.currency {\n+        if self.currency != /* ~ changed by cargo-mutants ~ */ rhs.currency {\n             Ok(())\n         } else {\n             Err(MoneyError::CurrencyMismatch {\n                 lhs: self.currency,\n                 rhs: rhs.currency,\n             })\n         }\n     }\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::same_currency",
+      "return_type": "-> Result<()>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 195
+        },
+        "start": {
+          "column": 5,
+          "line": 186
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:187:26: replace == with != in Money::same_currency",
+    "package": "velt-money",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 28,
+        "line": 187
+      },
+      "start": {
+        "column": 26,
+        "line": 187
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::add -> Result<Self> with Ok(Default::default())\n@@ -198,25 +198,17 @@\n     ///\n     /// # Errors\n     /// [`MoneyError::CurrencyMismatch`] or [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n     /// arithmetic that cannot report being wrong.\n     #[allow(clippy::should_implement_trait)]\n     pub fn add(self, rhs: Self) -> Result<Self> {\n-        self.same_currency(rhs)?;\n-        let minor = self\n-            .minor\n-            .checked_add(rhs.minor)\n-            .ok_or(MoneyError::Overflow { op: \"add\" })?;\n-        Ok(Self {\n-            minor,\n-            currency: self.currency,\n-        })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Checked subtraction. Currencies must match.\n     ///\n     /// # Errors\n     /// [`MoneyError::CurrencyMismatch`] or [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::add",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 215
+        },
+        "start": {
+          "column": 5,
+          "line": 197
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:206:9: replace Money::add -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 11,
+        "line": 214
+      },
+      "start": {
+        "column": 9,
+        "line": 206
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::sub -> Result<Self> with Ok(Default::default())\n@@ -218,25 +218,17 @@\n     ///\n     /// # Errors\n     /// [`MoneyError::CurrencyMismatch`] or [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n     /// arithmetic that cannot report being wrong.\n     #[allow(clippy::should_implement_trait)]\n     pub fn sub(self, rhs: Self) -> Result<Self> {\n-        self.same_currency(rhs)?;\n-        let minor = self\n-            .minor\n-            .checked_sub(rhs.minor)\n-            .ok_or(MoneyError::Overflow { op: \"sub\" })?;\n-        Ok(Self {\n-            minor,\n-            currency: self.currency,\n-        })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Checked negation.\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`] at `i64::MIN`.\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::sub",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 235
+        },
+        "start": {
+          "column": 5,
+          "line": 217
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:226:9: replace Money::sub -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 11,
+        "line": 234
+      },
+      "start": {
+        "column": 9,
+        "line": 226
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::neg -> Result<Self> with Ok(Default::default())\n@@ -238,24 +238,17 @@\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`] at `i64::MIN`.\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n     /// arithmetic that cannot report being wrong.\n     #[allow(clippy::should_implement_trait)]\n     pub fn neg(self) -> Result<Self> {\n-        let minor = self\n-            .minor\n-            .checked_neg()\n-            .ok_or(MoneyError::Overflow { op: \"neg\" })?;\n-        Ok(Self {\n-            minor,\n-            currency: self.currency,\n-        })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Multiply by an integer scalar (e.g. 12 months).\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     pub fn mul_int(self, n: i64) -> Result<Self> {\n         let minor = self\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::neg",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 254
+        },
+        "start": {
+          "column": 5,
+          "line": 237
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:246:9: replace Money::neg -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 11,
+        "line": 253
+      },
+      "start": {
+        "column": 9,
+        "line": 246
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::mul_int -> Result<Self> with Ok(Default::default())\n@@ -253,24 +253,17 @@\n         })\n     }\n \n     /// Multiply by an integer scalar (e.g. 12 months).\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     pub fn mul_int(self, n: i64) -> Result<Self> {\n-        let minor = self\n-            .minor\n-            .checked_mul(n)\n-            .ok_or(MoneyError::Overflow { op: \"mul_int\" })?;\n-        Ok(Self {\n-            minor,\n-            currency: self.currency,\n-        })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Sum an iterator of amounts, requiring a currency for the empty case.\n     ///\n     /// # Errors\n     /// [`MoneyError::CurrencyMismatch`] or [`MoneyError::Overflow`].\n     pub fn sum<I: IntoIterator<Item = Self>>(items: I, currency: Currency) -> Result<Self> {\n         items\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::mul_int",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 269
+        },
+        "start": {
+          "column": 5,
+          "line": 256
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:261:9: replace Money::mul_int -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 11,
+        "line": 268
+      },
+      "start": {
+        "column": 9,
+        "line": 261
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::sum -> Result<Self> with Ok(Default::default())\n@@ -268,19 +268,17 @@\n         })\n     }\n \n     /// Sum an iterator of amounts, requiring a currency for the empty case.\n     ///\n     /// # Errors\n     /// [`MoneyError::CurrencyMismatch`] or [`MoneyError::Overflow`].\n     pub fn sum<I: IntoIterator<Item = Self>>(items: I, currency: Currency) -> Result<Self> {\n-        items\n-            .into_iter()\n-            .try_fold(Self::zero(currency), |acc, item| acc.add(item))\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Apply a rate, rounding half-away-from-zero to the nearest minor unit.\n     ///\n     /// This is the single rounding policy in VELT. It is applied once, here, so\n     /// that a rounding change is a one-line diff with one snapshot-test delta\n     /// rather than a hunt through the engine.\n     ///\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::sum",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 279
+        },
+        "start": {
+          "column": 5,
+          "line": 271
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:276:9: replace Money::sum -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 71,
+        "line": 278
+      },
+      "start": {
+        "column": 9,
+        "line": 276
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::apply -> Result<Self> with Ok(Default::default())\n@@ -283,26 +283,17 @@\n     /// This is the single rounding policy in VELT. It is applied once, here, so\n     /// that a rounding change is a one-line diff with one snapshot-test delta\n     /// rather than a hunt through the engine.\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`] if the intermediate product exceeds `i128`\n     /// range or the result exceeds `i64`.\n     pub fn apply(self, rate: Bps) -> Result<Self> {\n-        let numer = i128::from(self.minor)\n-            .checked_mul(i128::from(rate.raw()))\n-            .ok_or(MoneyError::Overflow { op: \"apply\" })?;\n-        let denom = i128::from(Bps::SCALE);\n-        let minor = div_round_half_away(numer, denom)?;\n-        let minor = i64::try_from(minor).map_err(|_| MoneyError::Overflow { op: \"apply\" })?;\n-        Ok(Self {\n-            minor,\n-            currency: self.currency,\n-        })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Divide by an integer scalar, rounding half-away-from-zero.\n     ///\n     /// # Errors\n     /// [`MoneyError::DivideByZero`] or [`MoneyError::Overflow`].\n     pub fn div_int(self, n: i64) -> Result<Self> {\n         if n == 0 {\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::apply",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 301
+        },
+        "start": {
+          "column": 5,
+          "line": 281
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:291:9: replace Money::apply -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 11,
+        "line": 300
+      },
+      "start": {
+        "column": 9,
+        "line": 291
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::div_int -> Result<Self> with Ok(Default::default())\n@@ -300,25 +300,17 @@\n         })\n     }\n \n     /// Divide by an integer scalar, rounding half-away-from-zero.\n     ///\n     /// # Errors\n     /// [`MoneyError::DivideByZero`] or [`MoneyError::Overflow`].\n     pub fn div_int(self, n: i64) -> Result<Self> {\n-        if n == 0 {\n-            return Err(MoneyError::DivideByZero { op: \"div_int\" });\n-        }\n-        let minor = div_round_half_away(i128::from(self.minor), i128::from(n))?;\n-        let minor = i64::try_from(minor).map_err(|_| MoneyError::Overflow { op: \"div_int\" })?;\n-        Ok(Self {\n-            minor,\n-            currency: self.currency,\n-        })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Express `self` as a rate of `base` in basis points.\n     ///\n     /// This is how every ratio metric in VELT (cap rate, cash-on-cash, DSCR) is\n     /// produced: integer numerator over integer denominator, scaled to bps, with\n     /// one rounding step.\n     ///\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::div_int",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 317
+        },
+        "start": {
+          "column": 5,
+          "line": 303
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:308:9: replace Money::div_int -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 11,
+        "line": 316
+      },
+      "start": {
+        "column": 9,
+        "line": 308
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace == with != in Money::div_int\n@@ -300,17 +300,17 @@\n         })\n     }\n \n     /// Divide by an integer scalar, rounding half-away-from-zero.\n     ///\n     /// # Errors\n     /// [`MoneyError::DivideByZero`] or [`MoneyError::Overflow`].\n     pub fn div_int(self, n: i64) -> Result<Self> {\n-        if n == 0 {\n+        if n != /* ~ changed by cargo-mutants ~ */ 0 {\n             return Err(MoneyError::DivideByZero { op: \"div_int\" });\n         }\n         let minor = div_round_half_away(i128::from(self.minor), i128::from(n))?;\n         let minor = i64::try_from(minor).map_err(|_| MoneyError::Overflow { op: \"div_int\" })?;\n         Ok(Self {\n             minor,\n             currency: self.currency,\n         })\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::div_int",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 317
+        },
+        "start": {
+          "column": 5,
+          "line": 303
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:308:14: replace == with != in Money::div_int",
+    "package": "velt-money",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 16,
+        "line": 308
+      },
+      "start": {
+        "column": 14,
+        "line": 308
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Money::ratio_to -> Result<Bps> with Ok(Default::default())\n@@ -321,29 +321,17 @@\n     /// This is how every ratio metric in VELT (cap rate, cash-on-cash, DSCR) is\n     /// produced: integer numerator over integer denominator, scaled to bps, with\n     /// one rounding step.\n     ///\n     /// # Errors\n     /// [`MoneyError::CurrencyMismatch`], [`MoneyError::NonPositive`] if `base`\n     /// is not positive, or [`MoneyError::Overflow`].\n     pub fn ratio_to(self, base: Self) -> Result<Bps> {\n-        self.same_currency(base)?;\n-        if !base.is_positive() {\n-            return Err(MoneyError::NonPositive {\n-                field: \"ratio_to base\",\n-                value: base.minor,\n-            });\n-        }\n-        let numer = i128::from(self.minor)\n-            .checked_mul(i128::from(Bps::SCALE))\n-            .ok_or(MoneyError::Overflow { op: \"ratio_to\" })?;\n-        let raw = div_round_half_away(numer, i128::from(base.minor))?;\n-        let raw = i64::try_from(raw).map_err(|_| MoneyError::Overflow { op: \"ratio_to\" })?;\n-        Ok(Bps::from_raw(raw))\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n impl fmt::Display for Money {\n     /// Renders with the currency's full precision and no locale grouping.\n     /// Presentation formatting belongs in the terminal UI, not in the type.\n     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n         let sign = if self.minor < 0 { \"-\" } else { \"\" };\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::ratio_to",
+      "return_type": "-> Result<Bps>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 342
+        },
+        "start": {
+          "column": 5,
+          "line": 319
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:329:9: replace Money::ratio_to -> Result<Bps> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 31,
+        "line": 341
+      },
+      "start": {
+        "column": 9,
+        "line": 329
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ delete ! in Money::ratio_to\n@@ -322,17 +322,17 @@\n     /// produced: integer numerator over integer denominator, scaled to bps, with\n     /// one rounding step.\n     ///\n     /// # Errors\n     /// [`MoneyError::CurrencyMismatch`], [`MoneyError::NonPositive`] if `base`\n     /// is not positive, or [`MoneyError::Overflow`].\n     pub fn ratio_to(self, base: Self) -> Result<Bps> {\n         self.same_currency(base)?;\n-        if !base.is_positive() {\n+        if  /* ~ changed by cargo-mutants ~ */base.is_positive() {\n             return Err(MoneyError::NonPositive {\n                 field: \"ratio_to base\",\n                 value: base.minor,\n             });\n         }\n         let numer = i128::from(self.minor)\n             .checked_mul(i128::from(Bps::SCALE))\n             .ok_or(MoneyError::Overflow { op: \"ratio_to\" })?;\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Money::ratio_to",
+      "return_type": "-> Result<Bps>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 342
+        },
+        "start": {
+          "column": 5,
+          "line": 319
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "crates/velt-money/src/lib.rs:330:12: delete ! in Money::ratio_to",
+    "package": "velt-money",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 13,
+        "line": 330
+      },
+      "start": {
+        "column": 12,
+        "line": 330
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Bps::from_raw -> Self with Default::default()\n@@ -379,17 +379,17 @@\n     pub const ZERO: Self = Self(0);\n \n     /// 100%.\n     pub const ONE: Self = Self(Self::SCALE);\n \n     /// Construct from a raw basis-point count.\n     #[must_use]\n     pub const fn from_raw(raw: i64) -> Self {\n-        Self(raw)\n+        Default::default() /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Construct from whole percentage points (7% -> 700 bp).\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     pub fn from_percent(pct: i64) -> Result<Self> {\n         pct.checked_mul(100).map(Self).ok_or(MoneyError::Overflow {\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::from_raw",
+      "return_type": "-> Self",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 388
+        },
+        "start": {
+          "column": 5,
+          "line": 384
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:387:9: replace Bps::from_raw -> Self with Default::default()",
+    "package": "velt-money",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 387
+      },
+      "start": {
+        "column": 9,
+        "line": 387
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Bps::from_percent -> Result<Self> with Ok(Default::default())\n@@ -387,19 +387,17 @@\n         Self(raw)\n     }\n \n     /// Construct from whole percentage points (7% -> 700 bp).\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     pub fn from_percent(pct: i64) -> Result<Self> {\n-        pct.checked_mul(100).map(Self).ok_or(MoneyError::Overflow {\n-            op: \"Bps::from_percent\",\n-        })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// The raw basis-point count.\n     #[must_use]\n     pub const fn raw(self) -> i64 {\n         self.0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::from_percent",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 398
+        },
+        "start": {
+          "column": 5,
+          "line": 390
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:395:9: replace Bps::from_percent -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 11,
+        "line": 397
+      },
+      "start": {
+        "column": 9,
+        "line": 395
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Bps::raw -> i64 with 0\n@@ -395,17 +395,17 @@\n         pct.checked_mul(100).map(Self).ok_or(MoneyError::Overflow {\n             op: \"Bps::from_percent\",\n         })\n     }\n \n     /// The raw basis-point count.\n     #[must_use]\n     pub const fn raw(self) -> i64 {\n-        self.0\n+        0 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// True if strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n         self.0 > 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::raw",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 404
+        },
+        "start": {
+          "column": 5,
+          "line": 400
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:403:9: replace Bps::raw -> i64 with 0",
+    "package": "velt-money",
+    "replacement": "0",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 403
+      },
+      "start": {
+        "column": 9,
+        "line": 403
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Bps::raw -> i64 with 1\n@@ -395,17 +395,17 @@\n         pct.checked_mul(100).map(Self).ok_or(MoneyError::Overflow {\n             op: \"Bps::from_percent\",\n         })\n     }\n \n     /// The raw basis-point count.\n     #[must_use]\n     pub const fn raw(self) -> i64 {\n-        self.0\n+        1 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// True if strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n         self.0 > 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::raw",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 404
+        },
+        "start": {
+          "column": 5,
+          "line": 400
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:403:9: replace Bps::raw -> i64 with 1",
+    "package": "velt-money",
+    "replacement": "1",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 403
+      },
+      "start": {
+        "column": 9,
+        "line": 403
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Bps::raw -> i64 with -1\n@@ -395,17 +395,17 @@\n         pct.checked_mul(100).map(Self).ok_or(MoneyError::Overflow {\n             op: \"Bps::from_percent\",\n         })\n     }\n \n     /// The raw basis-point count.\n     #[must_use]\n     pub const fn raw(self) -> i64 {\n-        self.0\n+        -1 /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// True if strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n         self.0 > 0\n     }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::raw",
+      "return_type": "-> i64",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 404
+        },
+        "start": {
+          "column": 5,
+          "line": 400
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:403:9: replace Bps::raw -> i64 with -1",
+    "package": "velt-money",
+    "replacement": "-1",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 403
+      },
+      "start": {
+        "column": 9,
+        "line": 403
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Bps::is_positive -> bool with true\n@@ -401,17 +401,17 @@\n     #[must_use]\n     pub const fn raw(self) -> i64 {\n         self.0\n     }\n \n     /// True if strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n-        self.0 > 0\n+        true /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Checked addition.\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::is_positive",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 410
+        },
+        "start": {
+          "column": 5,
+          "line": 406
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:409:9: replace Bps::is_positive -> bool with true",
+    "package": "velt-money",
+    "replacement": "true",
+    "span": {
+      "end": {
+        "column": 19,
+        "line": 409
+      },
+      "start": {
+        "column": 9,
+        "line": 409
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Bps::is_positive -> bool with false\n@@ -401,17 +401,17 @@\n     #[must_use]\n     pub const fn raw(self) -> i64 {\n         self.0\n     }\n \n     /// True if strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n-        self.0 > 0\n+        false /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Checked addition.\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::is_positive",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 410
+        },
+        "start": {
+          "column": 5,
+          "line": 406
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:409:9: replace Bps::is_positive -> bool with false",
+    "package": "velt-money",
+    "replacement": "false",
+    "span": {
+      "end": {
+        "column": 19,
+        "line": 409
+      },
+      "start": {
+        "column": 9,
+        "line": 409
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace > with == in Bps::is_positive\n@@ -401,17 +401,17 @@\n     #[must_use]\n     pub const fn raw(self) -> i64 {\n         self.0\n     }\n \n     /// True if strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n-        self.0 > 0\n+        self.0 == /* ~ changed by cargo-mutants ~ */ 0\n     }\n \n     /// Checked addition.\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::is_positive",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 410
+        },
+        "start": {
+          "column": 5,
+          "line": 406
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:409:16: replace > with == in Bps::is_positive",
+    "package": "velt-money",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 409
+      },
+      "start": {
+        "column": 16,
+        "line": 409
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace > with < in Bps::is_positive\n@@ -401,17 +401,17 @@\n     #[must_use]\n     pub const fn raw(self) -> i64 {\n         self.0\n     }\n \n     /// True if strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n-        self.0 > 0\n+        self.0 < /* ~ changed by cargo-mutants ~ */ 0\n     }\n \n     /// Checked addition.\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::is_positive",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 410
+        },
+        "start": {
+          "column": 5,
+          "line": 406
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:409:16: replace > with < in Bps::is_positive",
+    "package": "velt-money",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 409
+      },
+      "start": {
+        "column": 16,
+        "line": 409
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace > with >= in Bps::is_positive\n@@ -401,17 +401,17 @@\n     #[must_use]\n     pub const fn raw(self) -> i64 {\n         self.0\n     }\n \n     /// True if strictly greater than zero.\n     #[must_use]\n     pub const fn is_positive(self) -> bool {\n-        self.0 > 0\n+        self.0 >= /* ~ changed by cargo-mutants ~ */ 0\n     }\n \n     /// Checked addition.\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::is_positive",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 410
+        },
+        "start": {
+          "column": 5,
+          "line": 406
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:409:16: replace > with >= in Bps::is_positive",
+    "package": "velt-money",
+    "replacement": ">=",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 409
+      },
+      "start": {
+        "column": 16,
+        "line": 409
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Bps::add -> Result<Self> with Ok(Default::default())\n@@ -413,20 +413,17 @@\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n     /// arithmetic that cannot report being wrong.\n     #[allow(clippy::should_implement_trait)]\n     pub fn add(self, rhs: Self) -> Result<Self> {\n-        self.0\n-            .checked_add(rhs.0)\n-            .map(Self)\n-            .ok_or(MoneyError::Overflow { op: \"Bps::add\" })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Checked subtraction.\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::add",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 425
+        },
+        "start": {
+          "column": 5,
+          "line": 412
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:421:9: replace Bps::add -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 60,
+        "line": 424
+      },
+      "start": {
+        "column": 9,
+        "line": 421
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Bps::sub -> Result<Self> with Ok(Default::default())\n@@ -428,20 +428,17 @@\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     /// Not `std::ops::Add`: that trait is infallible, and money addition here\n     /// can fail on currency mismatch or overflow. Doctrine §5 forbids money\n     /// arithmetic that cannot report being wrong.\n     #[allow(clippy::should_implement_trait)]\n     pub fn sub(self, rhs: Self) -> Result<Self> {\n-        self.0\n-            .checked_sub(rhs.0)\n-            .map(Self)\n-            .ok_or(MoneyError::Overflow { op: \"Bps::sub\" })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// The complement of this rate (`1 - self`), e.g. 1 - vacancy.\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     pub fn complement(self) -> Result<Self> {\n         Self::ONE.sub(self)\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::sub",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 440
+        },
+        "start": {
+          "column": 5,
+          "line": 427
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:436:9: replace Bps::sub -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 60,
+        "line": 439
+      },
+      "start": {
+        "column": 9,
+        "line": 436
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Bps::complement -> Result<Self> with Ok(Default::default())\n@@ -439,17 +439,17 @@\n             .ok_or(MoneyError::Overflow { op: \"Bps::sub\" })\n     }\n \n     /// The complement of this rate (`1 - self`), e.g. 1 - vacancy.\n     ///\n     /// # Errors\n     /// [`MoneyError::Overflow`].\n     pub fn complement(self) -> Result<Self> {\n-        Self::ONE.sub(self)\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n \n     /// Divide this rate by an integer (e.g. an annual rate to monthly).\n     ///\n     /// # Errors\n     /// [`MoneyError::DivideByZero`] or [`MoneyError::Overflow`].\n     pub fn div_int(self, n: i64) -> Result<Self> {\n         if n == 0 {\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::complement",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 448
+        },
+        "start": {
+          "column": 5,
+          "line": 442
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:447:9: replace Bps::complement -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 28,
+        "line": 447
+      },
+      "start": {
+        "column": 9,
+        "line": 447
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace Bps::div_int -> Result<Self> with Ok(Default::default())\n@@ -447,23 +447,17 @@\n         Self::ONE.sub(self)\n     }\n \n     /// Divide this rate by an integer (e.g. an annual rate to monthly).\n     ///\n     /// # Errors\n     /// [`MoneyError::DivideByZero`] or [`MoneyError::Overflow`].\n     pub fn div_int(self, n: i64) -> Result<Self> {\n-        if n == 0 {\n-            return Err(MoneyError::DivideByZero { op: \"Bps::div_int\" });\n-        }\n-        let raw = div_round_half_away(i128::from(self.0), i128::from(n))?;\n-        i64::try_from(raw)\n-            .map(Self)\n-            .map_err(|_| MoneyError::Overflow { op: \"Bps::div_int\" })\n+        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n impl fmt::Display for Bps {\n     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n         let sign = if self.0 < 0 { \"-\" } else { \"\" };\n         let abs = self.0.unsigned_abs();\n         let whole = abs.checked_div(100).unwrap_or(0);\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::div_int",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 462
+        },
+        "start": {
+          "column": 5,
+          "line": 450
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:455:9: replace Bps::div_int -> Result<Self> with Ok(Default::default())",
+    "package": "velt-money",
+    "replacement": "Ok(Default::default())",
+    "span": {
+      "end": {
+        "column": 70,
+        "line": 461
+      },
+      "start": {
+        "column": 9,
+        "line": 455
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace == with != in Bps::div_int\n@@ -447,17 +447,17 @@\n         Self::ONE.sub(self)\n     }\n \n     /// Divide this rate by an integer (e.g. an annual rate to monthly).\n     ///\n     /// # Errors\n     /// [`MoneyError::DivideByZero`] or [`MoneyError::Overflow`].\n     pub fn div_int(self, n: i64) -> Result<Self> {\n-        if n == 0 {\n+        if n != /* ~ changed by cargo-mutants ~ */ 0 {\n             return Err(MoneyError::DivideByZero { op: \"Bps::div_int\" });\n         }\n         let raw = div_round_half_away(i128::from(self.0), i128::from(n))?;\n         i64::try_from(raw)\n             .map(Self)\n             .map_err(|_| MoneyError::Overflow { op: \"Bps::div_int\" })\n     }\n }\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "Bps::div_int",
+      "return_type": "-> Result<Self>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 462
+        },
+        "start": {
+          "column": 5,
+          "line": 450
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:455:14: replace == with != in Bps::div_int",
+    "package": "velt-money",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 16,
+        "line": 455
+      },
+      "start": {
+        "column": 14,
+        "line": 455
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace div_round_half_away -> Result<i128> with Ok(0)\n@@ -473,43 +473,17 @@\n }\n \n /// Integer division rounding half away from zero.\n ///\n /// The one rounding primitive in VELT. Half-away-from-zero is chosen over\n /// banker's rounding because it matches the convention lenders and HUD schedules\n /// use in published figures, so hand-verified fixtures agree to the cent.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n-    if denom == 0 {\n-        return Err(MoneyError::DivideByZero {\n-            op: \"div_round_half_away\",\n-        });\n-    }\n-    // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n-    // and doctrine §5 does not permit a financial path that can panic.\n-    let quot = numer.checked_div(denom).ok_or(MoneyError::Overflow {\n-        op: \"div_round_half_away\",\n-    })?;\n-    let rem = numer.checked_rem(denom).ok_or(MoneyError::Overflow {\n-        op: \"div_round_half_away\",\n-    })?;\n-    if rem == 0 {\n-        return Ok(quot);\n-    }\n-    let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n-        op: \"div_round_half_away\",\n-    })?;\n-    if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n-        quot.checked_add(step).ok_or(MoneyError::Overflow {\n-            op: \"div_round_half_away\",\n-        })\n-    } else {\n-        Ok(quot)\n-    }\n+    Ok(0) /* ~ changed by cargo-mutants ~ */\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n     const USD: Currency = Currency::Usd;\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:481:5: replace div_round_half_away -> Result<i128> with Ok(0)",
+    "package": "velt-money",
+    "replacement": "Ok(0)",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 507
+      },
+      "start": {
+        "column": 5,
+        "line": 481
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace div_round_half_away -> Result<i128> with Ok(1)\n@@ -473,43 +473,17 @@\n }\n \n /// Integer division rounding half away from zero.\n ///\n /// The one rounding primitive in VELT. Half-away-from-zero is chosen over\n /// banker's rounding because it matches the convention lenders and HUD schedules\n /// use in published figures, so hand-verified fixtures agree to the cent.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n-    if denom == 0 {\n-        return Err(MoneyError::DivideByZero {\n-            op: \"div_round_half_away\",\n-        });\n-    }\n-    // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n-    // and doctrine §5 does not permit a financial path that can panic.\n-    let quot = numer.checked_div(denom).ok_or(MoneyError::Overflow {\n-        op: \"div_round_half_away\",\n-    })?;\n-    let rem = numer.checked_rem(denom).ok_or(MoneyError::Overflow {\n-        op: \"div_round_half_away\",\n-    })?;\n-    if rem == 0 {\n-        return Ok(quot);\n-    }\n-    let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n-        op: \"div_round_half_away\",\n-    })?;\n-    if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n-        quot.checked_add(step).ok_or(MoneyError::Overflow {\n-            op: \"div_round_half_away\",\n-        })\n-    } else {\n-        Ok(quot)\n-    }\n+    Ok(1) /* ~ changed by cargo-mutants ~ */\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n     const USD: Currency = Currency::Usd;\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:481:5: replace div_round_half_away -> Result<i128> with Ok(1)",
+    "package": "velt-money",
+    "replacement": "Ok(1)",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 507
+      },
+      "start": {
+        "column": 5,
+        "line": 481
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace div_round_half_away -> Result<i128> with Ok(-1)\n@@ -473,43 +473,17 @@\n }\n \n /// Integer division rounding half away from zero.\n ///\n /// The one rounding primitive in VELT. Half-away-from-zero is chosen over\n /// banker's rounding because it matches the convention lenders and HUD schedules\n /// use in published figures, so hand-verified fixtures agree to the cent.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n-    if denom == 0 {\n-        return Err(MoneyError::DivideByZero {\n-            op: \"div_round_half_away\",\n-        });\n-    }\n-    // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n-    // and doctrine §5 does not permit a financial path that can panic.\n-    let quot = numer.checked_div(denom).ok_or(MoneyError::Overflow {\n-        op: \"div_round_half_away\",\n-    })?;\n-    let rem = numer.checked_rem(denom).ok_or(MoneyError::Overflow {\n-        op: \"div_round_half_away\",\n-    })?;\n-    if rem == 0 {\n-        return Ok(quot);\n-    }\n-    let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n-        op: \"div_round_half_away\",\n-    })?;\n-    if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n-        quot.checked_add(step).ok_or(MoneyError::Overflow {\n-            op: \"div_round_half_away\",\n-        })\n-    } else {\n-        Ok(quot)\n-    }\n+    Ok(-1) /* ~ changed by cargo-mutants ~ */\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n     const USD: Currency = Currency::Usd;\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/velt-money/src/lib.rs:481:5: replace div_round_half_away -> Result<i128> with Ok(-1)",
+    "package": "velt-money",
+    "replacement": "Ok(-1)",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 507
+      },
+      "start": {
+        "column": 5,
+        "line": 481
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace == with != in div_round_half_away\n@@ -473,17 +473,17 @@\n }\n \n /// Integer division rounding half away from zero.\n ///\n /// The one rounding primitive in VELT. Half-away-from-zero is chosen over\n /// banker's rounding because it matches the convention lenders and HUD schedules\n /// use in published figures, so hand-verified fixtures agree to the cent.\n fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {\n-    if denom == 0 {\n+    if denom != /* ~ changed by cargo-mutants ~ */ 0 {\n         return Err(MoneyError::DivideByZero {\n             op: \"div_round_half_away\",\n         });\n     }\n     // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n     // and doctrine §5 does not permit a financial path that can panic.\n     let quot = numer.checked_div(denom).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:481:14: replace == with != in div_round_half_away",
+    "package": "velt-money",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 16,
+        "line": 481
+      },
+      "start": {
+        "column": 14,
+        "line": 481
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace == with != in div_round_half_away\n@@ -486,17 +486,17 @@\n     // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,\n     // and doctrine §5 does not permit a financial path that can panic.\n     let quot = numer.checked_div(denom).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n     let rem = numer.checked_rem(denom).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n-    if rem == 0 {\n+    if rem != /* ~ changed by cargo-mutants ~ */ 0 {\n         return Ok(quot);\n     }\n     let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n     if twice.abs() >= denom.abs() {\n         let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step).ok_or(MoneyError::Overflow {\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:494:12: replace == with != in div_round_half_away",
+    "package": "velt-money",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 14,
+        "line": 494
+      },
+      "start": {
+        "column": 12,
+        "line": 494
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace >= with < in div_round_half_away\n@@ -492,17 +492,17 @@\n         op: \"div_round_half_away\",\n     })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n-    if twice.abs() >= denom.abs() {\n+    if twice.abs() < /* ~ changed by cargo-mutants ~ */ denom.abs() {\n         let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step).ok_or(MoneyError::Overflow {\n             op: \"div_round_half_away\",\n         })\n     } else {\n         Ok(quot)\n     }\n }\n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:500:20: replace >= with < in div_round_half_away",
+    "package": "velt-money",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 500
+      },
+      "start": {
+        "column": 20,
+        "line": 500
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace == with != in div_round_half_away\n@@ -493,17 +493,17 @@\n     })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer < 0) != /* ~ changed by cargo-mutants ~ */ (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step).ok_or(MoneyError::Overflow {\n             op: \"div_round_half_away\",\n         })\n     } else {\n         Ok(quot)\n     }\n }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:501:35: replace == with != in div_round_half_away",
+    "package": "velt-money",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 37,
+        "line": 501
+      },
+      "start": {
+        "column": 35,
+        "line": 501
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace < with == in div_round_half_away\n@@ -493,17 +493,17 @@\n     })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer == /* ~ changed by cargo-mutants ~ */ 0) == (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step).ok_or(MoneyError::Overflow {\n             op: \"div_round_half_away\",\n         })\n     } else {\n         Ok(quot)\n     }\n }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:501:30: replace < with == in div_round_half_away",
+    "package": "velt-money",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 31,
+        "line": 501
+      },
+      "start": {
+        "column": 30,
+        "line": 501
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace < with > in div_round_half_away\n@@ -493,17 +493,17 @@\n     })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer > /* ~ changed by cargo-mutants ~ */ 0) == (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step).ok_or(MoneyError::Overflow {\n             op: \"div_round_half_away\",\n         })\n     } else {\n         Ok(quot)\n     }\n }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:501:30: replace < with > in div_round_half_away",
+    "package": "velt-money",
+    "replacement": ">",
+    "span": {
+      "end": {
+        "column": 31,
+        "line": 501
+      },
+      "start": {
+        "column": 30,
+        "line": 501
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace < with <= in div_round_half_away\n@@ -493,17 +493,17 @@\n     })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer <= /* ~ changed by cargo-mutants ~ */ 0) == (denom < 0) { 1 } else { -1 };\n         quot.checked_add(step).ok_or(MoneyError::Overflow {\n             op: \"div_round_half_away\",\n         })\n     } else {\n         Ok(quot)\n     }\n }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:501:30: replace < with <= in div_round_half_away",
+    "package": "velt-money",
+    "replacement": "<=",
+    "span": {
+      "end": {
+        "column": 31,
+        "line": 501
+      },
+      "start": {
+        "column": 30,
+        "line": 501
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace < with == in div_round_half_away\n@@ -493,17 +493,17 @@\n     })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer < 0) == (denom == /* ~ changed by cargo-mutants ~ */ 0) { 1 } else { -1 };\n         quot.checked_add(step).ok_or(MoneyError::Overflow {\n             op: \"div_round_half_away\",\n         })\n     } else {\n         Ok(quot)\n     }\n }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:501:45: replace < with == in div_round_half_away",
+    "package": "velt-money",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 46,
+        "line": 501
+      },
+      "start": {
+        "column": 45,
+        "line": 501
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace < with > in div_round_half_away\n@@ -493,17 +493,17 @@\n     })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer < 0) == (denom > /* ~ changed by cargo-mutants ~ */ 0) { 1 } else { -1 };\n         quot.checked_add(step).ok_or(MoneyError::Overflow {\n             op: \"div_round_half_away\",\n         })\n     } else {\n         Ok(quot)\n     }\n }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:501:45: replace < with > in div_round_half_away",
+    "package": "velt-money",
+    "replacement": ">",
+    "span": {
+      "end": {
+        "column": 46,
+        "line": 501
+      },
+      "start": {
+        "column": 45,
+        "line": 501
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ replace < with <= in div_round_half_away\n@@ -493,17 +493,17 @@\n     })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer < 0) == (denom <= /* ~ changed by cargo-mutants ~ */ 0) { 1 } else { -1 };\n         quot.checked_add(step).ok_or(MoneyError::Overflow {\n             op: \"div_round_half_away\",\n         })\n     } else {\n         Ok(quot)\n     }\n }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/velt-money/src/lib.rs:501:45: replace < with <= in div_round_half_away",
+    "package": "velt-money",
+    "replacement": "<=",
+    "span": {
+      "end": {
+        "column": 46,
+        "line": 501
+      },
+      "start": {
+        "column": 45,
+        "line": 501
+      }
+    }
+  },
+  {
+    "diff": "--- crates/velt-money/src/lib.rs\n+++ delete - in div_round_half_away\n@@ -493,17 +493,17 @@\n     })?;\n     if rem == 0 {\n         return Ok(quot);\n     }\n     let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {\n         op: \"div_round_half_away\",\n     })?;\n     if twice.abs() >= denom.abs() {\n-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };\n+        let step = if (numer < 0) == (denom < 0) { 1 } else {  /* ~ changed by cargo-mutants ~ */1 };\n         quot.checked_add(step).ok_or(MoneyError::Overflow {\n             op: \"div_round_half_away\",\n         })\n     } else {\n         Ok(quot)\n     }\n }\n \n",
+    "file": "crates/velt-money/src/lib.rs",
+    "function": {
+      "function_name": "div_round_half_away",
+      "return_type": "-> Result<i128>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 508
+        },
+        "start": {
+          "column": 1,
+          "line": 475
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "crates/velt-money/src/lib.rs:501:63: delete - in div_round_half_away",
+    "package": "velt-money",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 64,
+        "line": 501
+      },
+      "start": {
+        "column": 63,
+        "line": 501
+      }
+    }
+  }
+]

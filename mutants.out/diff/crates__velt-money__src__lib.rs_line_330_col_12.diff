@@ -1,0 +1,21 @@
+--- crates/velt-money/src/lib.rs
++++ delete ! in Money::ratio_to
+@@ -322,17 +322,17 @@
+     /// produced: integer numerator over integer denominator, scaled to bps, with
+     /// one rounding step.
+     ///
+     /// # Errors
+     /// [`MoneyError::CurrencyMismatch`], [`MoneyError::NonPositive`] if `base`
+     /// is not positive, or [`MoneyError::Overflow`].
+     pub fn ratio_to(self, base: Self) -> Result<Bps> {
+         self.same_currency(base)?;
+-        if !base.is_positive() {
++        if  /* ~ changed by cargo-mutants ~ */base.is_positive() {
+             return Err(MoneyError::NonPositive {
+                 field: "ratio_to base",
+                 value: base.minor,
+             });
+         }
+         let numer = i128::from(self.minor)
+             .checked_mul(i128::from(Bps::SCALE))
+             .ok_or(MoneyError::Overflow { op: "ratio_to" })?;

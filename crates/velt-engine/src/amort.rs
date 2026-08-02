@@ -336,4 +336,35 @@ mod tests {
         let payment = monthly_payment(usd(100_000_000_000), Bps::from_raw(700), 360).unwrap();
         assert!(payment.is_positive());
     }
+
+    /// Every sign combination, because the sign correction is a single `step`
+    /// of +1 or -1 and getting it backwards is off-by-a-cent in the direction
+    /// that flatters the deal.
+    ///
+    /// `cargo mutants` survived three mutations here on 2026-08-02 — the two
+    /// sign comparisons and the negation of `step` — because no case with a
+    /// negative operand existed. Identical assertions already guarded the copy
+    /// of this routine in `velt-money`; this one had none.
+    #[test]
+    fn rounding_goes_away_from_zero_in_every_sign_combination() {
+        assert_eq!(div_round_half_away(5, 2).unwrap(), 3, "+/+ half rounds up");
+        assert_eq!(div_round_half_away(-5, 2).unwrap(), -3, "-/+ rounds down");
+        assert_eq!(div_round_half_away(5, -2).unwrap(), -3, "+/- rounds down");
+        assert_eq!(div_round_half_away(-5, -2).unwrap(), 3, "-/- rounds up");
+    }
+
+    #[test]
+    fn rounding_leaves_exact_and_sub_half_quotients_alone() {
+        assert_eq!(div_round_half_away(4, 2).unwrap(), 2, "exact");
+        assert_eq!(div_round_half_away(1, 3).unwrap(), 0, "below half");
+        assert_eq!(div_round_half_away(-1, 3).unwrap(), 0, "above -half");
+    }
+
+    #[test]
+    fn rounding_rejects_a_zero_divisor_rather_than_panicking() {
+        assert!(matches!(
+            div_round_half_away(1, 0),
+            Err(MoneyError::DivideByZero { .. })
+        ));
+    }
 }
