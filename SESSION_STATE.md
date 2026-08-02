@@ -69,11 +69,9 @@ Until `pnpm install` completes, `node_modules/` and `pnpm-lock.yaml` do not
 exist, the TypeScript client has never been typechecked, and the JS side of the
 build is not reproducible. Commit `pnpm-lock.yaml` when it appears.
 
-To put the code on GitHub:
-
-```bash
-bash scripts/push-to-github.sh
-```
+The code is on GitHub at `satex25/VELT` (private), pushed over SSH in session 4.
+`git push` is all that is needed now; `scripts/push-to-github.sh` remains for
+setting up a credential on a fresh machine.
 
 ---
 
@@ -127,7 +125,7 @@ Static audit of the same date: no `f64` or `f32` in any financial path, no
 | Computed values carry provenance | ✅ the engine can only return `Traced` |
 | OpenAPI ↔ TypeScript drift check passes | ✅ **green** — `just drift` regenerates both and reports no diff |
 | It runs | ✅ **green** — daemon served `/health` and a real `/underwrite` over loopback |
-| Committed to the repo | ⚠️ committed locally, **never pushed** |
+| Committed to the repo | ✅ **green** — 17 commits pushed to `satex25/VELT` (private), remote `main` verified at the same SHA as local |
 
 **Every gate in `just ci` now passes on this machine (session 4).** The two that
 had never been reached were blocked behind `deps`, which `just ci` orders first;
@@ -345,23 +343,21 @@ uploading the directory as a workflow artifact.
 - **pnpm reports 9.12.3 → 11.18.0 available.** Do not take that upgrade
   casually: the version is pinned in `package.json` as a reproducibility
   guarantee, so bumping it is a deliberate commit, not a prompt to accept.
-- **Nothing is on GitHub, and the push is blocked on credentials.** Verified
-  session 4: `satex25/VELT` exists, is **empty** (`git ls-remote` returns no
-  refs, API reports `size: 0`), and its default branch is `main` — so a first
-  push cannot overwrite anything. What is missing is authentication. All three
-  paths are closed on this machine: `gh` is not installed, no HTTPS credential
-  is in the keychain (`git push` fails with *could not read Username*), and
-  `~/.ssh/id_ed25519.pub` exists but is **not registered on the GitHub
-  account** — `ssh -T git@github.com` returns *Permission denied (publickey)*.
-  Registering that key and switching the remote to SSH is the shortest fix;
-  `scripts/push-to-github.sh` automates it.
+- **The GitHub CI run has never been observed.** The code is pushed and
+  `.github/workflows/ci.yml` will have triggered, but the repository is private
+  and this machine has no API token or `gh` CLI, so the result could not be
+  read from here. Watch the first run: it does more than local `just ci` —
+  `cargo test --workspace --doc`, `pnpm install --frozen-lockfile`, and a
+  separate `mutants` job at `-j2` that is far slower than the ~5 minutes it
+  takes locally.
 
 ---
 
 ## Next, in order
 
-1. `bash scripts/push-to-github.sh` — get the work off a single laptop. This is
-   now the largest unmanaged risk: `just ci` is green and nothing is backed up.
+1. **Confirm the first CI run went green**, on GitHub rather than by inference.
+   It exercises three things local `just ci` does not, and until it is read it
+   is not evidence.
 2. **Persist something.** `velt-store` is implemented, tested, and called by
    nothing; `/underwrite` still forgets its answer the moment it responds. This
    is the biggest gap in the Rust half and the one the outside cannot see.
@@ -410,6 +406,9 @@ so the grant currently binds nobody: MIT runs to people who receive the code,
 and no one has. Making it public is therefore the decision that actually spends
 the optionality, not this file.
 
-The copyright line reads `Copyright (c) 2026 col`, taken from `git config
-user.name` because it is the only identity in the repository. Replace it with a
-legal name or company before the code is distributed to anyone.
+The copyright line reads `Copyright (c) 2026 satex25` — the GitHub account that
+owns the repository, chosen deliberately over the `git config user.name` value
+of `col`. It is a handle rather than a legal entity, which is sufficient while
+the repository is private and nobody has received the code. Put a legal name or
+registered company there before distributing to anyone, or before the copyright
+would ever need to be enforced or assigned.
