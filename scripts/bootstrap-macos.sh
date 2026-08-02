@@ -94,20 +94,34 @@ step "Installing Node.js"
 if [ -x "$NODE_PREFIX/bin/node" ]; then
   ok "node already installed ($("$NODE_PREFIX/bin/node" --version))"
 else
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+
   # Resolve the current LTS from the official index rather than hardcoding a
   # version that goes stale. package.json requires >=20.
+  #
+  # Downloaded to a file rather than piped into a parser. Node is the thing
+  # being installed, so it does not exist yet on a first run; piping into it
+  # kills the pipe and makes curl report a write failure (error 56) before the
+  # fallback parser ever runs. The download is fine, the error is noise, and
+  # noise in a bootstrap is indistinguishable from a real fault.
   echo "  resolving current Node LTS from nodejs.org…"
-  NODE_VER="$(curl -fsSL https://nodejs.org/dist/index.json \
-    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).find(r=>r.lts).version))' 2>/dev/null \
-    || curl -fsSL https://nodejs.org/dist/index.json \
-    | python3 -c 'import json,sys; print(next(r["version"] for r in json.load(sys.stdin) if r["lts"]))')"
+  curl -fsSL https://nodejs.org/dist/index.json -o "$TMP/index.json" \
+    || die "could not reach nodejs.org"
+
+  # python3 is guaranteed here: it ships with the Xcode Command Line Tools,
+  # which step 1 has already confirmed are installed.
+  NODE_VER="$(python3 -c '
+import json, sys
+with open(sys.argv[1]) as fh:
+    releases = json.load(fh)
+print(next(r["version"] for r in releases if r["lts"]))
+' "$TMP/index.json")" || die "could not parse the Node release index"
 
   [ -n "$NODE_VER" ] || die "could not resolve a Node LTS version"
   echo "  installing Node $NODE_VER ($NODE_ARCH)"
 
   TARBALL="node-${NODE_VER}-${NODE_ARCH}.tar.gz"
-  TMP="$(mktemp -d)"
-  trap 'rm -rf "$TMP"' EXIT
   curl -fsSL "https://nodejs.org/dist/${NODE_VER}/${TARBALL}" -o "$TMP/$TARBALL"
 
   # Verify against the official checksum file before extracting anything.
