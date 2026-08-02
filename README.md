@@ -12,6 +12,15 @@ Rust edition 2024, toolchain pinned to 1.97.1.
 
 ## Quick start
 
+First time on a machine — installs Rust, Node, pnpm and `just` into your home
+directory. **No administrator rights required; Homebrew is not used** (DR-003):
+
+```bash
+bash scripts/bootstrap-macos.sh
+```
+
+Then, in a new terminal:
+
 ```bash
 just setup     # install every tool the gates depend on (once)
 just ci        # every doctrine gate: fmt, lint, test, deps, openapi, drift
@@ -19,9 +28,13 @@ just daemon    # run the loopback daemon
 just watch     # bacon — background compiler, keyboard-driven
 ```
 
-`just` is the sole entry point (doctrine §7). There are no npm scripts, no
-Makefiles, and no shell scripts invoked directly except `scripts/create-github-repo.sh`,
-which runs once.
+`just` is the sole entry point (doctrine §7). There are no npm scripts and no
+Makefiles. Three shell scripts are invoked directly, each once and each for a
+reason `just` cannot cover: `bootstrap-macos.sh` installs `just` itself,
+`push-to-github.sh` sets up an SSH credential, and `create-github-repo.sh` is
+the legacy `gh`-based path kept for machines that have it.
+
+Current state, and what is verified where: **`SESSION_STATE.md`**.
 
 ### The gates
 
