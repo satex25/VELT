@@ -612,4 +612,56 @@ mod tests {
             Err(MoneyError::DivideByZero { op: "caller_name" })
         );
     }
+
+    /// `cargo mutants` replaced each of these predicates with a constant and
+    /// flipped each comparison on 2026-08-02; thirteen mutants survived because
+    /// nothing called them directly. They guard real branches — `ratio_to`
+    /// rejects a non-positive base with `is_positive` — so a predicate that
+    /// silently answers backwards mis-states a cap rate rather than failing.
+    ///
+    /// Each predicate is asserted at negative, zero and positive, because a
+    /// single case cannot distinguish `<` from `<=` or `==`.
+    #[test]
+    fn money_sign_predicates_are_asserted_at_every_boundary() {
+        assert!(usd(0).is_zero());
+        assert!(!usd(1).is_zero());
+        assert!(!usd(-1).is_zero());
+
+        assert!(usd(1).is_positive());
+        assert!(!usd(0).is_positive(), "zero is not positive");
+        assert!(!usd(-1).is_positive());
+
+        assert!(usd(-1).is_negative());
+        assert!(!usd(0).is_negative(), "zero is not negative");
+        assert!(!usd(1).is_negative());
+    }
+
+    #[test]
+    fn bps_is_positive_only_strictly_above_zero() {
+        assert!(Bps::from_raw(1).is_positive());
+        assert!(!Bps::ZERO.is_positive(), "zero is not positive");
+        assert!(!Bps::from_raw(-1).is_positive());
+    }
+
+    /// Both assertions are load-bearing. Mutating the guard to `n != 0` still
+    /// produces a `DivideByZero` for `n == 0`, because the rounding primitive
+    /// rejects it a line later with the same label — so only the non-zero case
+    /// distinguishes the mutant from the original.
+    #[test]
+    fn div_int_rejects_a_zero_divisor_and_divides_otherwise() {
+        assert_eq!(
+            usd(100).div_int(0),
+            Err(MoneyError::DivideByZero { op: "div_int" })
+        );
+        assert_eq!(usd(100).div_int(4).unwrap(), usd(25));
+    }
+
+    #[test]
+    fn bps_div_int_rejects_a_zero_divisor_and_divides_otherwise() {
+        assert_eq!(
+            Bps::from_raw(1_200).div_int(0),
+            Err(MoneyError::DivideByZero { op: "Bps::div_int" })
+        );
+        assert_eq!(Bps::from_raw(1_200).div_int(12).unwrap(), Bps::from_raw(100));
+    }
 }

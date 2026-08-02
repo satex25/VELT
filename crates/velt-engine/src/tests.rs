@@ -262,6 +262,39 @@ fn full_vacancy_is_rejected_as_out_of_model() {
     ));
 }
 
+/// The guard is `raw() < 0 || >= ONE`. Only the upper bound was tested, so
+/// `cargo mutants` turned `< 0` into `== 0` and `<= 0` on 2026-08-02 and both
+/// survived. The lower bound needs two cases: a negative rate must be rejected,
+/// and exactly zero must be accepted.
+///
+/// This matters beyond the lint. A negative vacancy rate makes the occupancy
+/// complement exceed 100%, so effective gross income would exceed scheduled
+/// rent — the model would report collecting more than it billed.
+#[test]
+fn a_negative_vacancy_rate_is_rejected() {
+    let (mut inputs, traced) = section8_sfr();
+    inputs.income.vacancy_rate = Bps::from_raw(-1);
+    assert!(matches!(
+        underwrite(&inputs, &traced),
+        Err(EngineError::InvalidInput {
+            field: "vacancy_rate",
+            ..
+        })
+    ));
+}
+
+/// Zero vacancy is unrealistic but in-model, and it is the boundary that
+/// separates `< 0` from `<= 0`.
+#[test]
+fn a_zero_vacancy_rate_is_accepted() {
+    let (mut inputs, traced) = section8_sfr();
+    inputs.income.vacancy_rate = Bps::ZERO;
+    assert!(
+        underwrite(&inputs, &traced).is_ok(),
+        "zero vacancy is in-model"
+    );
+}
+
 #[test]
 fn mixing_currencies_is_an_error_not_a_silent_conversion() {
     let (mut inputs, traced) = section8_sfr();
