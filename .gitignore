@@ -10,3 +10,12 @@ dist/
 .env
 .env.local
 *.log
+
+# cargo-mutants output — a build artifact, not a record. Every run rewrites the
+# whole directory, so tracking it made each mutation run a ~9,500-line diff
+# across 130 files and buried the actual change in the commit. The report is
+# still kept on CI, which uploads this directory as a workflow artifact
+# (.github/workflows/ci.yml). `mutants.out.old` is the previous run, which
+# cargo-mutants rotates automatically.
+mutants.out/
+mutants.out.old/
