@@ -43,14 +43,27 @@ run `bash scripts/bootstrap-macos.sh` first — no administrator rights needed.
 
 ```bash
 cd ~/Desktop/velt
-just setup     # finish the JS half: this is what creates pnpm-lock.yaml
-just ci        # every doctrine gate
+source ~/.zshrc   # only needed in a terminal opened before the bootstrap ran
+just doctor       # confirms this shell can see cargo, node, pnpm, just
+just setup        # finishes the JS half; creates pnpm-lock.yaml
+just ci           # every doctrine gate
 ```
 
-`just setup` did not reach its `pnpm install` step on the first run, so
-`node_modules/` and `pnpm-lock.yaml` do not exist yet. Until they do, the
-TypeScript client has never been typechecked and the JS side of the build is
-not reproducible. Commit `pnpm-lock.yaml` when it appears.
+**Run the two `just` commands separately, not as `just setup && just ci`.** With
+`&&`, a failure in `setup` silently skips `ci`, which reads as though `ci` were
+the thing that failed.
+
+`just setup` did not reach its `pnpm install` step on the first attempt —
+`pnpm` was not on the PATH of that shell. Recipes inherit the PATH of the shell
+that invoked `just`, and the bootstrap writes its PATH block to `~/.zshrc`,
+which an already-open session never re-reads. `~/.cargo/bin` was present from an
+earlier rustup install, which is why `cargo` worked and `node`/`pnpm` did not.
+`just doctor` diagnoses exactly this, and `setup` now prints the fix instead of
+`command not found`.
+
+Until `pnpm install` completes, `node_modules/` and `pnpm-lock.yaml` do not
+exist, the TypeScript client has never been typechecked, and the JS side of the
+build is not reproducible. Commit `pnpm-lock.yaml` when it appears.
 
 To put the code on GitHub:
 

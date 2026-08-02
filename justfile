@@ -127,12 +127,88 @@ dev:
 # Housekeeping
 # ---------------------------------------------------------------------------
 
+# Report which required tools are reachable from a recipe shell. Run this first
+# when anything fails with "command not found": recipes inherit the PATH of the
+# shell that invoked `just`, so a tool installed into a profile file the current
+# session never re-read is invisible here while looking fine everywhere else.
+doctor:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    printf '%-16s %s\n' TOOL WHERE
+    printf '%-16s %s\n' ---- -----
+    missing=0
+    for t in cargo rustc just node pnpm; do
+      if command -v "$t" >/dev/null 2>&1; then
+        printf '%-16s %s\n' "$t" "$(command -v "$t")"
+      else
+        printf '%-16s \033[31mNOT FOUND\033[0m\n' "$t"
+        missing=1
+      fi
+    done
+    echo
+    for t in cargo-nextest cargo-deny cargo-machete cargo-insta cargo-mutants bacon; do
+      if command -v "$t" >/dev/null 2>&1; then
+        printf '%-16s %s\n' "$t" ok
+      else
+        printf '%-16s \033[33mmissing — run: just setup\033[0m\n' "$t"
+      fi
+    done
+    if [ "$missing" -eq 1 ]; then
+      printf '\n\033[33mSomething core is missing from this shell.\033[0m\n'
+      printf 'If the bootstrap has already run, this shell predates it:\n\n'
+      printf '    source ~/.zshrc        # this shell, right now\n'
+      printf '    (or just open a new terminal window)\n\n'
+      printf 'If that does not fix it: bash scripts/bootstrap-macos.sh\n'
+      exit 1
+    fi
+    printf '\n\033[32mAll required tools reachable.\033[0m\n'
+
 # Install every tool the gates above depend on.
 setup:
-    cargo install cargo-binstall
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    echo "→ cargo tooling"
+    cargo install cargo-binstall --locked 2>/dev/null || true
     cargo binstall -y cargo-nextest cargo-insta cargo-mutants cargo-deny \
-                      bacon cargo-llvm-cov cargo-hakari cargo-machete sccache
+                      bacon cargo-llvm-cov cargo-hakari cargo-machete sccache || exit 1
+
+    echo
+    echo "→ javascript workspace"
+
+    # corepack ships inside Node and can activate the pnpm version pinned in
+    # package.json without a separate install. Try that before giving up, so a
+    # missing shim self-heals rather than stopping the recipe.
+    if ! command -v pnpm >/dev/null 2>&1 && command -v corepack >/dev/null 2>&1; then
+      corepack enable >/dev/null 2>&1 || true
+      corepack prepare --activate >/dev/null 2>&1 || true
+    fi
+
+    if ! command -v pnpm >/dev/null 2>&1; then
+      echo >&2
+      echo "  pnpm is not reachable from this shell." >&2
+      echo >&2
+      if [ -x "$HOME/.local/node/bin/node" ]; then
+        echo "  Node IS installed at ~/.local/node, so the bootstrap worked." >&2
+        echo "  This shell was opened before the PATH block was written to" >&2
+        echo "  ~/.zshrc and has never re-read it. Fix with either:" >&2
+        echo >&2
+        echo "      source ~/.zshrc      # this shell, right now" >&2
+        echo "      (or open a new terminal window)" >&2
+      else
+        echo "  Node is not installed. Run:" >&2
+        echo >&2
+        echo "      bash scripts/bootstrap-macos.sh" >&2
+      fi
+      echo >&2
+      echo "  Then check with: just doctor" >&2
+      echo >&2
+      exit 127
+    fi
+
     pnpm install
+    echo
+    echo "✓ setup complete — pnpm-lock.yaml is a build input, commit it."
 
 clean:
     cargo clean

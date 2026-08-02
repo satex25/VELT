@@ -40,6 +40,7 @@ Current state, and what is verified where: **`SESSION_STATE.md`**.
 
 | Command | What it does |
 |---|---|
+| `just doctor` | Which tools this shell can actually see. Run first on any "command not found". |
 | `just ci` | The Definition of Done (§9). This is the gate. |
 | `just ci-full` | `ci` plus mutation testing and coverage. Run before a release. |
 | `just test-engine` | Tight loop on the two crates where being wrong is fatal. |
