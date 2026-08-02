@@ -69,8 +69,8 @@ Until `pnpm install` completes, `node_modules/` and `pnpm-lock.yaml` do not
 exist, the TypeScript client has never been typechecked, and the JS side of the
 build is not reproducible. Commit `pnpm-lock.yaml` when it appears.
 
-The code is on GitHub at `satex25/VELT` (private), pushed over SSH in session 4.
-`git push` is all that is needed now; `scripts/push-to-github.sh` remains for
+The code is on GitHub at `satex25/VELT`, **public**, pushed over SSH in session
+4. `git push` is all that is needed now; `scripts/push-to-github.sh` remains for
 setting up a credential on a fresh machine.
 
 ---
@@ -125,7 +125,7 @@ Static audit of the same date: no `f64` or `f32` in any financial path, no
 | Computed values carry provenance | ✅ the engine can only return `Traced` |
 | OpenAPI ↔ TypeScript drift check passes | ✅ **green** — `just drift` regenerates both and reports no diff |
 | It runs | ✅ **green** — daemon served `/health` and a real `/underwrite` over loopback |
-| Committed to the repo | ✅ **green** — 17 commits pushed to `satex25/VELT` (private), remote `main` verified at the same SHA as local |
+| Committed to the repo | ✅ **green** — pushed to `satex25/VELT` (public); remote `main` verified at the same SHA as local, nothing unpushed |
 
 **Every gate in `just ci` now passes on this machine (session 4).** The two that
 had never been reached were blocked behind `deps`, which `just ci` orders first;
@@ -343,21 +343,38 @@ uploading the directory as a workflow artifact.
 - **pnpm reports 9.12.3 → 11.18.0 available.** Do not take that upgrade
   casually: the version is pinned in `package.json` as a reproducibility
   guarantee, so bumping it is a deliberate commit, not a prompt to accept.
-- **The GitHub CI run has never been observed.** The code is pushed and
-  `.github/workflows/ci.yml` will have triggered, but the repository is private
-  and this machine has no API token or `gh` CLI, so the result could not be
-  read from here. Watch the first run: it does more than local `just ci` —
-  `cargo test --workspace --doc`, `pnpm install --frozen-lockfile`, and a
-  separate `mutants` job at `-j2` that is far slower than the ~5 minutes it
-  takes locally.
+- **GitHub CI has never passed, and both jobs failed for reasons that have
+  nothing to do with the code.** Read from the Actions API once the repository
+  went public; two runs, both `failure`. Flagged here rather than assumed green,
+  which is exactly why it was worth flagging.
+
+  **`doctrine gates` died at step 6 of 16.** `pnpm/action-setup@v4` was given
+  `version: 10` while `package.json` pins `packageManager: pnpm@9.12.3`; the
+  action refuses a conflicting pair. Every gate after it — fmt, lint, tests,
+  deps, drift — was **skipped**, so CI has never actually verified anything on
+  this repository. The `version:` line is removed; the action now reads
+  `package.json`, which is also the only value the committed lockfile works
+  with. Fixed, but unverified until a run goes green.
+
+  **`mutation testing` cannot pass as written.** `cargo mutants` exits 3 when
+  any mutant survives, and two survive by construction — the `numer`/`denom`
+  pair with a written proof that no test can kill them. Confirmed locally: exit
+  3 on all three session-4 runs, including the final one. The job is therefore
+  red permanently, which is worse than absent, because a gate that is always
+  red is a gate nobody reads. **Not yet fixed** — it needs a decision about what
+  the gate should assert, and the honest options are to compare against a known
+  survivor set, or to make the job informational and let `just ci-full` be the
+  real check before a release.
 
 ---
 
 ## Next, in order
 
-1. **Confirm the first CI run went green**, on GitHub rather than by inference.
-   It exercises three things local `just ci` does not, and until it is read it
-   is not evidence.
+1. **Get CI green.** It has never passed. The pnpm setup break is fixed but
+   unverified; the mutation job still needs a decision about what it should
+   assert, since two provably-equivalent survivors make `cargo mutants` exit
+   non-zero forever. Until a run is green, no gate has ever been enforced by
+   anything except a human running `just ci` locally.
 2. **Persist something.** `velt-store` is implemented, tested, and called by
    nothing; `/underwrite` still forgets its answer the moment it responds. This
    is the biggest gap in the Rust half and the one the outside cannot see.
@@ -399,16 +416,28 @@ outside this repository. The earlier claim that "no foreclosure has occurred"
 was true when written and is no longer true; it has been removed from the README
 rather than left standing.
 
-Two things preserve most of the remaining optionality. Copyright is undivided —
-a single holder — so future work can be licensed differently, and MIT cannot be
-retracted only for commits already published. And **the repository is private**,
-so the grant currently binds nobody: MIT runs to people who receive the code,
-and no one has. Making it public is therefore the decision that actually spends
-the optionality, not this file.
+One thing preserves the remaining optionality: copyright is undivided — a single
+holder — so future work can be licensed differently. MIT cannot be retracted for
+commits already published.
+
+**The repository was made public on 2026-08-02, and that is the step that spent
+the rest.** This file previously noted that while the repository stayed private
+the grant bound nobody, because MIT runs only to people who receive the code —
+and that publishing, not the LICENSE file, would be the decision that mattered.
+That decision has now been taken deliberately: the plan is for VELT to be public
+regardless. Anyone may now use, modify and sell this code. Recorded as fact, not
+as a caveat.
 
 The copyright line reads `Copyright (c) 2026 satex25` — the GitHub account that
 owns the repository, chosen deliberately over the `git config user.name` value
-of `col`. It is a handle rather than a legal entity, which is sufficient while
-the repository is private and nobody has received the code. Put a legal name or
-registered company there before distributing to anyone, or before the copyright
-would ever need to be enforced or assigned.
+of `col`. Now that the repository is public this is the attribution MIT requires
+every downstream copy to preserve, so it is worth replacing with a legal name or
+registered company: a handle is weak if the copyright ever has to be enforced or
+assigned. Changing it later is a one-line commit and does not affect copies
+already taken.
+
+**Author email is public.** All commits carry `col <gracecolin1@gmail.com>` in
+both author and committer fields, and that is now world-readable. Setting a
+GitHub `@users.noreply.github.com` address fixes it for future commits; the
+existing 18 would need a history rewrite, which changes every SHA and is
+probably not worth it.
