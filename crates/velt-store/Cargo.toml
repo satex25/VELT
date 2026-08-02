@@ -7,11 +7,14 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-velt-engine = { workspace = true }
+# Deliberately NOT dependent on velt-engine. `put_snapshot` is generic over
+# `T: serde::Serialize` and writes an opaque JSON TEXT column, so the store is
+# decoupled from engine types by design — the engine can change its result
+# shape without a schema migration here. utoipa is likewise absent: store types
+# are not part of the HTTP contract.
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-utoipa = { workspace = true }
 uuid = { workspace = true }
 rusqlite = { workspace = true }
 

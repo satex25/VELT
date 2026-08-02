@@ -7,11 +7,16 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# No chrono. `Datum::fetched_at` is an RFC-3339 `String` supplied by the caller,
+# not a chrono type produced here. A datetime crate at this boundary invites a
+# `Utc::now()` call, and the connector feeds the engine, which doctrine §5
+# requires to be free of any clock. The trade is weaker typing on that one
+# field; if it ever needs validating, parse it at the boundary and keep the
+# clock out.
 velt-provenance = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 utoipa = { workspace = true }
-chrono = { workspace = true }
 
 [lints]
 workspace = true

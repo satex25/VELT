@@ -157,6 +157,36 @@ copy comes via `serde_derive` and `utoipa-gen`, the 2.x copy via
 it clears itself upstream. Left as a warning rather than silenced with a `skip`,
 because a `skip` would also hide a future duplicate that mattered.
 
+### The daemon does not persist
+
+`cargo machete` ran for the first time on 2026-08-02 and reported six unused
+dependencies. Five were leftovers. The sixth is a finding.
+
+**`velt-daemon` did not use `velt-store` or `velt-connector` at all.**
+`post_underwrite` computes a result, returns it over HTTP, and forgets it. The
+immutable-snapshot and current-pointer machinery in `velt-store` is
+implemented, tested, and called by nothing. `AppState` even documents
+`engine_version` as "stamped onto every snapshot" — there are no snapshots.
+
+Nothing VELT computes currently survives the response.
+
+All six were removed rather than added to a `cargo-machete` ignore list.
+Reserving the dependency slot would have hidden this from the only tool that
+found it. `velt-store` and `velt-connector` get added back in the same commit
+that first calls them.
+
+The other five, with the design reason each removal is safe:
+
+| Crate | Removed | Why it was safe |
+|---|---|---|
+| `velt-store` | `velt-engine` | `put_snapshot` is generic over `T: Serialize` and writes an opaque JSON column — decoupled from engine types on purpose |
+| `velt-store` | `utoipa` | store types are not part of the HTTP contract |
+| `velt-connector` | `chrono` | `Datum::fetched_at` is an RFC-3339 `String` supplied by the caller; a datetime crate here invites `Utc::now()` next to the engine, which §5 forbids |
+| `velt-daemon` | `serde_json` | only ever reached through `axum::Json`, which carries its own copy |
+
+Verified before removal: zero references to any of the six anywhere under
+`crates/*/src`, including test modules and derive attributes.
+
 ---
 
 ## Not done — declared, not disguised
@@ -164,16 +194,18 @@ because a `skip` would also hide a future duplicate that mattered.
 - **No user interface.** `apps/shell` and `apps/terminal` are README stubs.
 - **No live connector.** The framework is built; HUD FMR, listing sources, and
   assessor data are not wired. Each needs a written rights posture first (§5).
-- **`cargo deny` has now run** (and found the wildcard problem above, which is
-  fixed). **`cargo machete` and `cargo mutants` still have not** — `deps` failed
-  before reaching machete, and mutants is a separate recipe.
-- **`pnpm install` has never completed**, so `tsc` has never typechecked the
-  generated TypeScript client. The earlier `node_modules/` was deleted because
-  it had been installed by npm rather than the pinned pnpm and contained a Linux
-  turbo binary; the replacement has not been created yet.
-- **No lockfile for the JavaScript side.** `pnpm-lock.yaml` does not exist, so
-  JS builds are not reproducible the way Cargo builds are. `just setup`
-  creates it — commit it when it appears.
+- **Nothing is persisted.** See "The daemon does not persist" above. This is the
+  largest gap in the Rust half and it is invisible from the outside, because
+  `/underwrite` returns a correct answer either way.
+- **`cargo deny` and `cargo machete` have now both run and both found real
+  problems**, since fixed. **`cargo mutants` still has not** — it is a separate
+  recipe and has never been executed anywhere.
+- **`pnpm install` completed on 2026-08-02.** `pnpm-lock.yaml` now exists and is
+  a build input — keep it committed. `tsc` has still not typechecked the
+  generated client, because `just ci` has not yet reached the `drift` gate.
+- **pnpm reports 9.12.3 → 11.18.0 available.** Do not take that upgrade
+  casually: the version is pinned in `package.json` as a reproducibility
+  guarantee, so bumping it is a deliberate commit, not a prompt to accept.
 - **Nothing is on GitHub.** The remote points at `satex25/VELT`. The earlier
   push failed because GitHub disabled password authentication over HTTPS in
   August 2021; an account password cannot work. `scripts/push-to-github.sh`

@@ -14,13 +14,19 @@ path = "src/main.rs"
 velt-money = { workspace = true }
 velt-provenance = { workspace = true }
 velt-engine = { workspace = true }
-velt-connector = { workspace = true }
-velt-store = { workspace = true }
+# velt-connector and velt-store are NOT dependencies yet, and their absence is
+# the honest record of a gap rather than an oversight. `post_underwrite`
+# computes a result and returns it; nothing is persisted, so the immutable
+# snapshot and current-pointer machinery in velt-store is real, tested, and
+# called by no one. See SESSION_STATE.md, "The daemon does not persist".
+#
+# Add each back in the same commit that first uses it. Carrying an unused
+# dependency to reserve the slot would hide the gap from `cargo machete`, which
+# is the only thing that found it.
 axum = { workspace = true }
 tokio = { workspace = true }
 tower-http = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 utoipa = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
