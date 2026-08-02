@@ -1,5 +1,8 @@
 [workspace]
-resolver = "2"
+# resolver 3 is the edition-2024 default: it is MSRV-aware, so a transitive
+# dependency that raises its own rust-version above ours is rejected at resolve
+# time instead of failing the build with a confusing error.
+resolver = "3"
 members = [
     "crates/velt-money",
     "crates/velt-provenance",
@@ -11,8 +14,11 @@ members = [
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.83"
+edition = "2024"
+# Edition 2024 requires 1.85. Verified clean under 1.97.1 via `cargo fix
+# --edition` — the migration produced a zero-line diff, so no 2021-era idioms
+# remain in the tree.
+rust-version = "1.85"
 license = "UNLICENSED"
 publish = false
 
@@ -63,7 +69,22 @@ todo              = "deny"
 unimplemented     = "deny"
 dbg_macro         = "deny"
 
+[profile.dev]
+# Line tables only. Backtraces and panic locations still resolve; full DWARF
+# does not, which is the single largest link-time cost on an incremental build.
+debug = 1
+
+[profile.dev.package."*"]
+# Optimise dependencies once and cache them forever — they change on the order
+# of once a month, while the workspace crates change every minute. This is what
+# makes proptest runs and the bundled-SQLite tests bearable in the inner loop.
+opt-level = 2
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
 strip = true
+# Deliberately NOT `panic = "abort"`. Clippy denies `panic` in workspace code,
+# so a panic here means a bug in a dependency — and on a local-first terminal
+# that should surface as a 500 from the axum catch-panic layer, not as the
+# whole daemon vanishing mid-session while the user has unsaved analysis open.

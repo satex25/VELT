@@ -8,17 +8,46 @@ Status: **Day 1 scaffold.** The underwriting engine, money primitives, provenanc
 tracer, connector boundary, snapshot store, and daemon are implemented and tested.
 The Electron shell and React terminal UI are stubs.
 
+Rust edition 2024, toolchain pinned to 1.97.1.
+
 ## Quick start
 
 ```bash
-just ci        # every doctrine gate: fmt, lint, test, openapi, drift
+just setup     # install every tool the gates depend on (once)
+just ci        # every doctrine gate: fmt, lint, test, deps, openapi, drift
 just daemon    # run the loopback daemon
-just test      # tests, including snapshot-to-the-cent financial fixtures
+just watch     # bacon — background compiler, keyboard-driven
 ```
 
 `just` is the sole entry point (doctrine §7). There are no npm scripts, no
 Makefiles, and no shell scripts invoked directly except `scripts/create-github-repo.sh`,
 which runs once.
+
+### The gates
+
+| Command | What it does |
+|---|---|
+| `just ci` | The Definition of Done (§9). This is the gate. |
+| `just ci-full` | `ci` plus mutation testing and coverage. Run before a release. |
+| `just test-engine` | Tight loop on the two crates where being wrong is fatal. |
+| `just mutants` | Mutation testing. A surviving mutant is a bug in the *tests*. |
+| `just deps` | Advisories, licence allow-list, banned crates, unused deps. |
+| `just review` | Interactive insta snapshot review. |
+| `just coverage` | HTML coverage report over the workspace. |
+
+### Toolchain
+
+| Tool | Role |
+|---|---|
+| `cargo-nextest` | One process per test — enforces engine purity, not just speed |
+| `cargo-insta` | Snapshot-to-the-cent fixtures |
+| `cargo-mutants` | Proves the fixtures actually constrain the engine |
+| `cargo-deny` | Advisories + licence policy (a §6 optionality gate) |
+| `cargo-machete` | Unused-dependency sweep |
+| `bacon` | Background compiler, keyboard-first |
+| `cargo-llvm-cov` | Coverage floor |
+| `cargo-hakari` | Workspace feature unification |
+| `sccache` | CI compilation cache |
 
 ## Layout
 
@@ -51,6 +80,9 @@ These are not conventions. Each is a build failure.
 | Data rights checked before scraping | `Connector` cannot be implemented without a `RightsPosture` | trait signature |
 | Immutable results, current-pointer flip | `Store::put_snapshot` inserts and flips in one transaction; no update path | `velt-store` tests |
 | Rust is the single source of truth | `just drift` regenerates OpenAPI + TS client and fails on any diff | CI `gate` job |
+| Tests actually constrain the engine | `cargo mutants` on `velt-engine` + `velt-money` | CI `mutants` job |
+| No copyleft crate can silently foreclose a commercial model (§6) | `deny.toml` permissive-only allow-list | `just deps` |
+| Builds are reproducible | toolchain pinned in `rust-toolchain.toml`; `wildcards = "deny"` | `just deps` |
 
 ## Numerical correctness
 
@@ -72,4 +104,8 @@ Amortization compounds in i128 fixed point at 1e12 and rounds exactly once.
 **CMR-OPEN** (doctrine §6). No architecture here forecloses subscription,
 perpetual license, or proprietary-edge. Entitlement is not yet implemented;
 when it is, it goes behind a single trait with a `NullEntitlement` default.
-See `docs/decisions/DR-001-scaffold.md`.
+
+Licence audit 2026-08-02: 153 resolved packages, zero crates whose only
+available licence is copyleft. No foreclosure has occurred.
+
+See `docs/decisions/DR-001-scaffold.md` and `docs/decisions/DR-002-toolchain.md`.

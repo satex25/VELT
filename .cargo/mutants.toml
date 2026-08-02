@@ -1,0 +1,46 @@
+# cargo-mutants — adversarial verification of the test suite.
+#
+# Snapshot tests prove the engine matches its fixtures. They do not prove the
+# fixtures constrain the engine. cargo-mutants closes that gap: it replaces
+# function bodies with plausible wrong values (a Money that returns zero, a
+# comparison that flips, a rate that returns the default) and reports any
+# mutant the suite fails to kill. A surviving mutant in a financial path is a
+# test-coverage hole in the one area doctrine §2 says outranks profit.
+#
+# Usage:
+#   just mutants          # engine + money only, the paths that matter
+#   just mutants-all      # whole workspace, slow, run before a release
+#
+# A surviving mutant is a bug report against the tests, not against the code.
+
+# Scope: the pure computation engine and the money primitives. Mutating the
+# daemon or the store mostly produces mutants killed by integration behaviour
+# rather than by unit tests, which is noise at this stage.
+examine_globs = [
+    "crates/velt-engine/**/*.rs",
+    "crates/velt-money/**/*.rs",
+]
+
+exclude_globs = [
+    "crates/*/src/tests.rs",
+    "**/tests/**",
+]
+
+# Skip functions where a mutation is meaningless rather than untested:
+# formatting, trait plumbing, and constructors that only move fields.
+exclude_re = [
+    "impl Debug",
+    "impl Display",
+    "fmt::",
+    "::fmt",
+]
+
+# nextest gives per-test process isolation, which matters more than usual here:
+# a mutant that corrupts global state must not be able to influence the next
+# mutant's test run.
+test_tool = "nextest"
+
+# A mutant that hangs is a mutant that turned a loop into an infinite one —
+# amortization schedules are the obvious candidate. Cap it rather than wait.
+timeout_multiplier = 4.0
+minimum_test_timeout = 20

@@ -1,0 +1,22 @@
+# Cargo configuration.
+#
+# Fast linkers: mold (Linux) and wild (Linux) are the meaningful wins, and both
+# are Linux-only, so they belong in CI rather than on the Mac. macOS already
+# uses Apple's parallel linker by default and does not benefit from mold.
+# Uncomment on a Linux box after `apt install mold`:
+#
+# [target.x86_64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[alias]
+# Short forms of the doctrine gates. `just` remains the sole task runner for
+# anything composite (doctrine §7) — these are single-command conveniences only.
+lint = "clippy --workspace --all-targets -- -D warnings"
+t = "nextest run --workspace"
+# The engine is the only place where being wrong is fatal, so it gets its own
+# one-key loop.
+te = "nextest run -p velt-engine -p velt-money"
+
+[net]
+git-fetch-with-cli = true

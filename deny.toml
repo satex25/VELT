@@ -1,0 +1,75 @@
+# VELT dependency policy — doctrine §5 (legal integrity) mechanised.
+#
+# This file is a blocking CI gate, not advice. Two things it protects:
+#
+#   1. Supply chain. Every advisory in the RustSec DB is checked against the
+#      resolved graph on every push.
+#   2. CMR optionality (doctrine §6). A copyleft crate reaching the statically
+#      linked daemon binary would silently foreclose commercial model B
+#      (perpetual proprietary license) — an unflagged foreclosure, which §6
+#      forbids. The allow-list below is the enforcement point.
+#
+# Audited 2026-08-02 against the resolved graph: 153 packages, zero crates
+# whose only available license is copyleft. `r-efi` is tri-licensed
+# (MIT OR Apache-2.0 OR LGPL-2.1-or-later) and is taken under MIT; it is a
+# UEFI-target dependency and is not linked on macOS or Linux.
+
+[graph]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+all-features = false
+
+[advisories]
+# Empty by design. An ignored advisory must be added here with a written
+# reason, which makes the exception reviewable in the diff.
+ignore = []
+
+[licenses]
+# Permissive only. Adding a license here is a commercial-model decision, not a
+# build fix — if a new dependency needs an entry, read §6 before adding it.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.93
+
+[licenses.private]
+# VELT's own crates are `license = "UNLICENSED"`, `publish = false`.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+# A `*` version requirement makes the build non-reproducible. In a system whose
+# output is money, that is disqualifying.
+wildcards = "deny"
+highlight = "all"
+
+deny = [
+    { crate = "openssl-sys", reason = "Use rustls. OpenSSL adds a C build dependency, a CVE surface, and a distribution headache for a signed desktop binary." },
+    { crate = "openssl", reason = "Use rustls." },
+    { crate = "chrono-tz", reason = "Ships a full tzdata copy; if timezone handling is genuinely needed, decide it in a DR first." },
+]
+
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

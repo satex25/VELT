@@ -4,51 +4,122 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch cancels the first. Nothing is gained by
+# finishing a run against a superseded commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # -------------------------------------------------------------------------
+  # The Definition of Done (doctrine §9), enforced.
+  # -------------------------------------------------------------------------
   gate:
     name: doctrine gates
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
+      # Pinned to the same version as rust-toolchain.toml. A financial terminal
+      # that builds against "whatever stable is today" is not reproducible.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.97.1"
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Prebuilt binaries. Compiling these from source costs ~8 minutes a run.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-deny,cargo-machete
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
-      - name: Install just
-        uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v3
 
       - run: pnpm install --frozen-lockfile
 
-      # Doctrine §9 — Definition of Done, enforced.
       - name: Format
         run: just fmt-check
 
-      # The f64 ban, the pure-engine rule, and the panic ban are all clippy
-      # gates. This step is why they are constraints and not conventions.
+      # The f64 ban, the pure-engine rule, the panic ban and the
+      # arithmetic-side-effects ban are all clippy gates. This step is why they
+      # are constraints and not conventions.
       - name: Lint (f64 ban, purity, panic ban)
         run: just lint
 
       - name: Tests (snapshot-to-the-cent on financial paths)
-        run: just test
+        run: cargo nextest run --workspace --profile ci
+
+      - name: Doctests
+        run: cargo test --workspace --doc
+
+      # Doctrine §5 legal integrity and §6 CMR optionality.
+      - name: Dependency policy (advisories, licences, bans)
+        run: just deps
 
       # Doctrine §7 — blocking gate.
       - name: OpenAPI ↔ TypeScript drift
         run: just drift
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: ignore
+
+  # -------------------------------------------------------------------------
+  # Mutation testing. Separate job because it is slow and must not block fast
+  # feedback — but a surviving mutant on a money path still fails the run.
+  # -------------------------------------------------------------------------
+  mutants:
+    name: mutation testing (financial paths)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants,cargo-nextest
+
+      - name: Mutate velt-engine and velt-money
+        run: cargo mutants --no-shuffle -j2 --in-place
+
+      - name: Upload mutants report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-report
+          path: mutants.out/
+          if-no-files-found: ignore

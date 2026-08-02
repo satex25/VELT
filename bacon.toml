@@ -1,0 +1,51 @@
+# bacon — background compiler, keyboard-driven, no mouse.
+# Run `bacon` in a split pane and leave it there. Keys are single-press:
+#   c check   l clip   t test   e engine   d doc   q quit
+# Doctrine §8: terminal-grade, keyboard-first, zero layout jitter.
+
+default_job = "clippy"
+
+[jobs.check]
+command = ["cargo", "check", "--workspace", "--all-targets", "--color", "always"]
+need_stdout = false
+
+# The doctrine gate. `-D warnings` is what turns the f64 ban, the panic ban and
+# the arithmetic-side-effects ban from conventions into compile errors, so this
+# is the job you should actually sit in.
+[jobs.clippy]
+command = [
+    "cargo", "clippy",
+    "--workspace", "--all-targets",
+    "--color", "always",
+    "--", "-D", "warnings",
+]
+need_stdout = false
+
+[jobs.test]
+command = ["cargo", "nextest", "run", "--workspace", "--color", "always", "--hide-progress-bar"]
+need_stdout = true
+analyzer = "nextest"
+
+# Tight loop for the pure engine — the only crate where correctness is the
+# entire product. Runs on every keystroke-save without waiting on the daemon,
+# the store, or the connector tree.
+[jobs.engine]
+command = ["cargo", "nextest", "run", "-p", "velt-engine", "-p", "velt-money", "--color", "always", "--hide-progress-bar"]
+need_stdout = true
+analyzer = "nextest"
+
+[jobs.doc]
+command = ["cargo", "doc", "--workspace", "--no-deps", "--color", "always"]
+need_stdout = false
+
+[jobs.doc-open]
+command = ["cargo", "doc", "--workspace", "--no-deps", "--open", "--color", "always"]
+need_stdout = false
+on_success = "back"
+
+[keybindings]
+e = "job:engine"
+t = "job:test"
+c = "job:check"
+l = "job:clippy"
+d = "job:doc"

@@ -1,0 +1,39 @@
+# cargo-nextest — one process per test.
+#
+# Process isolation is not just a speed feature here. The computation engine is
+# required to be pure (doctrine §5): no I/O, no clock, no ambient state. Under
+# `cargo test` all tests in a binary share one process, so a test that only
+# passes because a previous test left state behind still goes green. Under
+# nextest it does not. This file is part of how the purity constraint is
+# actually enforced rather than merely asserted.
+
+[profile.default]
+retries = 0
+failure-output = "immediate-final"
+fail-fast = false
+status-level = "fail"
+final-status-level = "slow"
+slow-timeout = { period = "20s", terminate-after = 6 }
+
+[profile.ci]
+retries = 0
+failure-output = "immediate-final"
+fail-fast = false
+status-level = "retry"
+final-status-level = "flaky"
+slow-timeout = { period = "60s", terminate-after = 3 }
+
+[profile.ci.junit]
+path = "junit.xml"
+
+# Financial paths get zero retry tolerance and a hard timeout. A flaky test on
+# the underwriting engine is not flaky — it is a determinism bug, and retrying
+# it would hide exactly the class of defect this project cannot ship.
+[[profile.default.overrides]]
+filter = 'package(velt-engine) or package(velt-money)'
+retries = 0
+slow-timeout = { period = "5s", terminate-after = 2 }
+
+[[profile.ci.overrides]]
+filter = 'package(velt-engine) or package(velt-money)'
+retries = 0

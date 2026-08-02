@@ -32,7 +32,7 @@ pub mod amort;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use velt_money::{Bps, Currency, Money, MoneyError};
-use velt_provenance::{derive, Traced};
+use velt_provenance::{Traced, derive};
 
 /// Errors produced by the engine.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

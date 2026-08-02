@@ -27,7 +27,9 @@ pub enum ConnectorError {
     /// This is a hard error, not a warning: a source that ships demographic
     /// scoring must be handled explicitly by adding the field to the connector's
     /// declared drop list, so that the decision is visible in a diff.
-    #[error("fair housing violation: source '{source_id}' shipped forbidden field '{field}' ({reason}); declare it in the connector's drop list or remove the source")]
+    #[error(
+        "fair housing violation: source '{source_id}' shipped forbidden field '{field}' ({reason}); declare it in the connector's drop list or remove the source"
+    )]
     FairHousing {
         /// Connector that produced the record.
         source_id: &'static str,
