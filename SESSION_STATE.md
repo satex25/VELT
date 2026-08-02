@@ -345,10 +345,16 @@ uploading the directory as a workflow artifact.
 - **pnpm reports 9.12.3 → 11.18.0 available.** Do not take that upgrade
   casually: the version is pinned in `package.json` as a reproducibility
   guarantee, so bumping it is a deliberate commit, not a prompt to accept.
-- **Nothing is on GitHub.** The remote points at `satex25/VELT`. The earlier
-  push failed because GitHub disabled password authentication over HTTPS in
-  August 2021; an account password cannot work. `scripts/push-to-github.sh`
-  sets up an SSH key instead.
+- **Nothing is on GitHub, and the push is blocked on credentials.** Verified
+  session 4: `satex25/VELT` exists, is **empty** (`git ls-remote` returns no
+  refs, API reports `size: 0`), and its default branch is `main` — so a first
+  push cannot overwrite anything. What is missing is authentication. All three
+  paths are closed on this machine: `gh` is not installed, no HTTPS credential
+  is in the keychain (`git push` fails with *could not read Username*), and
+  `~/.ssh/id_ed25519.pub` exists but is **not registered on the GitHub
+  account** — `ssh -T git@github.com` returns *Permission denied (publickey)*.
+  Registering that key and switching the remote to SSH is the shortest fix;
+  `scripts/push-to-github.sh` automates it.
 
 ---
 
@@ -380,5 +386,30 @@ multi-tenant storage, or paid data contract exists.
 
 Licence audit 2026-08-02: 153 resolved packages, zero crates whose only
 available licence is copyleft. `r-efi` is tri-licensed and taken under MIT.
-No foreclosure has occurred; models A, B and C all remain live. `deny.toml` is
-the standing gate that keeps it that way, and `just deps` is how it is checked.
+`deny.toml` is the standing gate on the dependency graph, and `just deps` is how
+it is checked.
+
+### Licence decision, session 4 — VELT is MIT
+
+`Cargo.toml` declared `license = "UNLICENSED"` and there was no `LICENSE` file.
+Both are now MIT, and `LICENSE` is committed.
+
+**This is a real narrowing of §6 and is recorded rather than glossed.** MIT
+grants anyone who receives the code the right to use, modify, sublicense and
+sell it. Model A (subscription / hosted) is unaffected. Model B (perpetual
+licence) loses the code itself as leverage, since MIT already conveys perpetual
+use to any recipient. Model C (proprietary edge) survives only for modules kept
+outside this repository. The earlier claim that "no foreclosure has occurred"
+was true when written and is no longer true; it has been removed from the README
+rather than left standing.
+
+Two things preserve most of the remaining optionality. Copyright is undivided —
+a single holder — so future work can be licensed differently, and MIT cannot be
+retracted only for commits already published. And **the repository is private**,
+so the grant currently binds nobody: MIT runs to people who receive the code,
+and no one has. Making it public is therefore the decision that actually spends
+the optionality, not this file.
+
+The copyright line reads `Copyright (c) 2026 col`, taken from `git config
+user.name` because it is the only identity in the repository. Replace it with a
+legal name or company before the code is distributed to anyone.
