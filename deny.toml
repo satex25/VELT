@@ -32,19 +32,24 @@ ignore = []
 [licenses]
 # Permissive only. Adding a license here is a commercial-model decision, not a
 # build fix — if a new dependency needs an entry, read §6 before adding it.
+# Every entry below is a license actually present in the resolved graph. Five
+# speculative entries were removed on 2026-08-02 because `cargo deny` reported
+# them as never encountered: "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause",
+# "ISC", "CC0-1.0" and "MPL-2.0".
+#
+# Removing them is the point rather than a side effect. An allow-list of
+# licenses nobody uses is a pre-approval: the day a dependency arrives under
+# MPL-2.0 — which is weak copyleft and therefore a §6 question — it would have
+# been admitted silently. Now it fails the build and becomes a decision. Re-add
+# an entry when a real dependency needs it, in a commit that says why.
 allow = [
     "MIT",
     "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
-    "BSD-2-Clause",
     "BSD-3-Clause",
-    "ISC",
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
     "BSL-1.0",
-    "CC0-1.0",
-    "MPL-2.0",
 ]
 confidence-threshold = 0.93
 
@@ -53,10 +58,28 @@ confidence-threshold = 0.93
 ignore = true
 
 [bans]
+# Warn, not deny. `syn` is currently resolved at both 2.0.x and 3.0.x: the 3.x
+# copy arrives through serde_derive and utoipa-gen, the 2.x copy through
+# tracing-attributes, which has not migrated yet. Nothing in this workspace can
+# fix that, and it resolves itself when tracing-attributes updates. Left as a
+# warning on purpose — a `skip` entry would silence this one and every future
+# duplicate of the same crate, including one that actually mattered.
 multiple-versions = "warn"
+
 # A `*` version requirement makes the build non-reproducible. In a system whose
 # output is money, that is disqualifying.
 wildcards = "deny"
+
+# Scoped exemption: wildcards are tolerated only for private path dependencies
+# (crates marked `publish = false`), which resolve to a directory on disk and
+# so cannot float. External wildcards remain denied.
+#
+# The workspace crates now carry explicit versions in Cargo.toml, so this is
+# currently a backstop rather than an active allowance — it stops a future
+# internal crate added without a version from failing the gate for a
+# reproducibility problem it does not have.
+allow-wildcard-paths = true
+
 highlight = "all"
 
 deny = [

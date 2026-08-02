@@ -23,11 +23,20 @@ license = "UNLICENSED"
 publish = false
 
 [workspace.dependencies]
-velt-money       = { path = "crates/velt-money" }
-velt-provenance  = { path = "crates/velt-provenance" }
-velt-engine      = { path = "crates/velt-engine" }
-velt-connector   = { path = "crates/velt-connector" }
-velt-store       = { path = "crates/velt-store" }
+# `version` is carried alongside `path` deliberately. A path dependency with no
+# version field has an implicit requirement of `*`, and `wildcards = "deny"` in
+# deny.toml — which exists to stop an external `serde = "*"` — cannot tell that
+# case apart from this one. Stating the version makes the requirement `^0.1.0`,
+# so the gate sees a real constraint instead of a wildcard.
+#
+# These must track [workspace.package] version above. They are private crates
+# (`publish = false`), so the version is never resolved from a registry; it
+# exists to satisfy the dependency policy and to make the graph self-describing.
+velt-money       = { path = "crates/velt-money",      version = "0.1.0" }
+velt-provenance  = { path = "crates/velt-provenance", version = "0.1.0" }
+velt-engine      = { path = "crates/velt-engine",     version = "0.1.0" }
+velt-connector   = { path = "crates/velt-connector",  version = "0.1.0" }
+velt-store       = { path = "crates/velt-store",      version = "0.1.0" }
 
 serde       = { version = "1.0.229", features = ["derive"] }
 serde_json  = "1.0.151"

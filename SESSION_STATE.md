@@ -3,8 +3,12 @@
 **Updated:** 2026-08-02 (session 3)
 **Repository:** `~/Desktop/velt` — this folder is the whole project. Nothing
 lives anywhere else.
-**Phase:** Core Rust engine written and tested. Toolchain not yet installed on
-this Mac. UI not started.
+**Phase:** Core Rust engine builds and tests green on this Mac. Toolchain
+installed. UI not started.
+
+**This folder is the project.** `~/Desktop/velt` and nowhere else. No second
+copy, no other working directory. If a stale `VELT.zip` is still sitting on the
+Desktop, delete it — two copies of a project is how they diverge.
 
 ---
 
@@ -12,45 +16,41 @@ this Mac. UI not started.
 
 If you have lost the thread, this section is the answer.
 
-**What exists:** six Rust crates, 2,853 lines, 50 tests. The money primitives,
-the underwriting engine, the provenance tracer, the Fair Housing connector
-boundary, the snapshot store, and an HTTP daemon. This is the hard half of the
-product and it is real code, not scaffolding.
+**What exists:** six Rust crates, 2,853 lines, 50 tests — all 50 passing on
+this machine. The money primitives, the underwriting engine, the provenance
+tracer, the Fair Housing connector boundary, the snapshot store, and an HTTP
+daemon. This is the hard half of the product and it is real code, not
+scaffolding.
 
 **What does not exist:** any user interface. The Electron shell and the React
 terminal are two README files that say "not implemented." No live data source
 is connected — no HUD figures, no listings, no comps. VELT cannot currently
 show you a property.
 
-**What is blocking you:** the Rust toolchain is not installed on this Mac, so
-nothing here can be compiled or run locally. That is fixable in about ten
-minutes and does not require administrator rights. See "Start here" below.
+**What is blocking you:** nothing structural any more. The toolchain is
+installed, the workspace compiles clean, and the tests pass. What remains is
+building things that do not exist yet.
 
-**Honest one-line summary:** a correct, well-built engine with no face and no
-data, on a machine that cannot yet compile it.
+**Honest one-line summary:** a correct, verified engine with no face and no
+data.
 
 ---
 
 ## Start here
 
-Run these in Terminal, in order.
+The toolchain is already installed (session 3). If you are on a fresh machine,
+run `bash scripts/bootstrap-macos.sh` first — no administrator rights needed.
 
 ```bash
 cd ~/Desktop/velt
-bash scripts/bootstrap-macos.sh   # installs Rust, Node, pnpm, just — no sudo
+just setup     # finish the JS half: this is what creates pnpm-lock.yaml
+just ci        # every doctrine gate
 ```
 
-Then open a **new** Terminal window and run:
-
-```bash
-cd ~/Desktop/velt
-just setup                        # cargo-nextest, cargo-deny, bacon, pnpm install
-just ci                           # every doctrine gate, on this machine
-```
-
-A green `just ci` is the first time the Definition of Done (§9) will have been
-confirmed on hardware you own. Until then, treat the test results below as
-inherited, not observed.
+`just setup` did not reach its `pnpm install` step on the first run, so
+`node_modules/` and `pnpm-lock.yaml` do not exist yet. Until they do, the
+TypeScript client has never been typechecked and the JS side of the build is
+not reproducible. Commit `pnpm-lock.yaml` when it appears.
 
 To put the code on GitHub:
 
@@ -67,15 +67,20 @@ repository was built and tested inside a Linux container, not on this Mac. The
 container is gone. Its build output has been deleted from `target/` because it
 was `aarch64-unknown-linux-gnu` and macOS `cargo` cannot use a byte of it.
 
-| Crate | Purpose | Tests | Verified in Linux container | Verified on this Mac |
+**Superseded 2026-08-02, session 3: the workspace now builds and tests green on
+this Mac.** `cargo nextest` reported *50 tests run: 50 passed, 0 skipped* across
+6 binaries, after a clean 38.69s compile under 1.97.1 / aarch64-apple-darwin.
+The Mac column below is no longer inherited.
+
+| Crate | Purpose | Tests | Linux container | This Mac |
 |---|---|---:|:---:|:---:|
-| `velt-money` | integer minor units, `Bps`, one rounding policy | 10 | ✅ | ⬜ |
-| `velt-provenance` | `Traced<T>`, trace tree, source rollup | 4 | ✅ | ⬜ |
-| `velt-engine` | underwriting + fixed-point amortization | 27 | ✅ | ⬜ |
-| `velt-connector` | trust tiers, Fair Housing filter, rights posture | 7 | ✅ | ⬜ |
-| `velt-store` | SQLite WAL, immutable snapshots, pointer flip | 2 | ✅ | ⬜ |
-| `velt-daemon` | axum on loopback, utoipa OpenAPI | — | ✅ | ⬜ |
-| | | **50** | | |
+| `velt-money` | integer minor units, `Bps`, one rounding policy | 10 | ✅ | ✅ |
+| `velt-provenance` | `Traced<T>`, trace tree, source rollup | 4 | ✅ | ✅ |
+| `velt-engine` | underwriting + fixed-point amortization | 27 | ✅ | ✅ |
+| `velt-connector` | trust tiers, Fair Housing filter, rights posture | 7 | ✅ | ✅ |
+| `velt-store` | SQLite WAL, immutable snapshots, pointer flip | 2 | ✅ | ✅ |
+| `velt-daemon` | axum on loopback, utoipa OpenAPI | — | ✅ | builds |
+| | | **50** | | **50/50** |
 
 ### Independently re-verified 2026-08-02
 
@@ -98,16 +103,46 @@ Static audit of the same date: no `f64` or `f32` in any financial path, no
 
 | Gate | Status |
 |---|---|
-| Compiles clean, zero warnings, clippy included | ⚠️ passed in the container; **unconfirmed on this Mac** |
-| Tests pass, snapshot-to-the-cent on financial paths | ⚠️ 50/50 in the container; fixtures independently re-verified |
+| Compiles clean, zero warnings, clippy included | ✅ **confirmed on this Mac** — `fmt-check` and `clippy -D warnings` both green |
+| Tests pass, snapshot-to-the-cent on financial paths | ✅ **50/50 on this Mac**; fixtures also independently re-verified |
 | External data has rights posture + trust tier | ✅ enforced by trait signature — no live connector exists yet |
 | Computed values carry provenance | ✅ the engine can only return `Traced` |
-| OpenAPI ↔ TypeScript drift check passes | ⚠️ generated in the container; re-run `just drift` here |
-| It runs | ❌ **not on this machine.** No toolchain installed. |
+| OpenAPI ↔ TypeScript drift check passes | ⬜ not yet reached — `deps` fails before `drift` runs |
+| It runs | ⬜ daemon compiles; not yet exercised over HTTP here |
 | Committed to the repo | ⚠️ committed locally, **never pushed** |
 
-Four of seven gates are unconfirmed on this Mac. That is the honest count, and
-`bash scripts/bootstrap-macos.sh` followed by `just ci` closes all four.
+Two gates went green on this machine in session 3. Two remain unreached because
+`just ci` orders `deps` before `openapi` and `drift`, and `deps` was failing.
+
+### The `cargo deny` failure and its fix
+
+First real run of `just deps` on 2026-08-02 returned:
+
+```
+advisories ok, bans FAILED, licenses ok, sources ok
+```
+
+**Cause.** `[workspace.dependencies]` declared the internal crates with `path`
+and no `version`. A path dependency without a version carries an implicit
+requirement of `*`, and `wildcards = "deny"` — a rule aimed at external floats
+like `serde = "*"` — cannot distinguish that from a local path dep, which
+resolves to a directory on disk and cannot float. The gate fired on its own
+workspace, not on a real reproducibility problem.
+
+**Fixed by** stating `version = "0.1.0"` on each internal dependency, plus
+`allow-wildcard-paths = true` as a scoped backstop for private crates. External
+wildcards are still denied.
+
+Also cleared in the same pass: five `license-not-encountered` warnings, by
+removing allow-list entries no crate in the graph uses — including `MPL-2.0`,
+which is weak copyleft and would have been a §6 question had it ever arrived.
+The allow-list is now seven entries, all of them observed in the resolved graph.
+
+**Not fixed, deliberately:** `syn` resolves at both 2.0.119 and 3.0.3. The 3.x
+copy comes via `serde_derive` and `utoipa-gen`, the 2.x copy via
+`tracing-attributes`, which has not migrated. Nothing here can change that, and
+it clears itself upstream. Left as a warning rather than silenced with a `skip`,
+because a `skip` would also hide a future duplicate that mattered.
 
 ---
 
@@ -116,16 +151,16 @@ Four of seven gates are unconfirmed on this Mac. That is the honest count, and
 - **No user interface.** `apps/shell` and `apps/terminal` are README stubs.
 - **No live connector.** The framework is built; HUD FMR, listing sources, and
   assessor data are not wired. Each needs a written rights posture first (§5).
-- **`cargo deny`, `cargo machete`, `cargo mutants` have never executed.** The
-  configs are syntactically valid and the licence audit was done directly
-  against `cargo metadata`, but the tools themselves have not run. `just deps`
-  is the first real test of that.
-- **`pnpm install` has never run**, so `tsc` has never typechecked the generated
-  TypeScript client. `node_modules/` was deleted: it had been installed by npm
-  rather than the pinned pnpm, and contained a Linux turbo binary.
+- **`cargo deny` has now run** (and found the wildcard problem above, which is
+  fixed). **`cargo machete` and `cargo mutants` still have not** — `deps` failed
+  before reaching machete, and mutants is a separate recipe.
+- **`pnpm install` has never completed**, so `tsc` has never typechecked the
+  generated TypeScript client. The earlier `node_modules/` was deleted because
+  it had been installed by npm rather than the pinned pnpm and contained a Linux
+  turbo binary; the replacement has not been created yet.
 - **No lockfile for the JavaScript side.** `pnpm-lock.yaml` does not exist, so
-  JS builds are not yet reproducible the way Cargo builds are. `just setup`
-  creates it — commit it.
+  JS builds are not reproducible the way Cargo builds are. `just setup`
+  creates it — commit it when it appears.
 - **Nothing is on GitHub.** The remote points at `satex25/VELT`. The earlier
   push failed because GitHub disabled password authentication over HTTPS in
   August 2021; an account password cannot work. `scripts/push-to-github.sh`
@@ -135,8 +170,8 @@ Four of seven gates are unconfirmed on this Mac. That is the honest count, and
 
 ## Next, in order
 
-1. `bash scripts/bootstrap-macos.sh`, then `just setup && just ci`. Nothing else
-   matters until every gate is green on hardware you control.
+1. `just setup && just ci`. Two gates are green; drive the remaining ones green
+   before building anything new on top.
 2. `bash scripts/push-to-github.sh` — get the work off a single laptop.
 3. `just mutants` — the first mutation run on the engine. Every surviving
    mutant is a missing test. Fix them before building anything on top.
