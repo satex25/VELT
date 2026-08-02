@@ -18,7 +18,7 @@ ci: fmt-check lint test deps openapi drift
 
 # Everything in `ci`, plus the slow adversarial checks. Run before a release or
 # after any change to the underwriting engine.
-ci-full: ci mutants coverage
+ci-full: ci mutants-check coverage
     @echo "✓ all gates passed, including mutation and coverage"
 
 # ---------------------------------------------------------------------------
@@ -88,6 +88,45 @@ audit:
 # not against the code.
 mutants:
     cargo mutants --no-shuffle -j4
+
+# The gate form of `mutants`, and what CI runs. Judged against the survivors
+# proven unkillable in .config/mutants-expected-survivors.txt rather than
+# against zero, because `cargo mutants` exits non-zero whenever anything
+# survives and two survive by construction. A job that can never pass is a job
+# nobody reads.
+#
+# Fails when the survivor set changes in either direction. A new survivor is a
+# missing test. A survivor that disappeared means the expected file is stale and
+# should shrink — that is good news, but it still has to be recorded.
+mutants-check jobs="2":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    expected=".config/mutants-expected-survivors.txt"
+
+    # The run's own exit code is not the signal: it is non-zero in the normal
+    # case. A missing outcomes.json is the signal, because it means the run
+    # never completed — a baseline build failure rather than a survivor.
+    cargo mutants --no-shuffle -j{{jobs}} || true
+    if [[ ! -f mutants.out/outcomes.json ]]; then
+        echo "✗ the mutation run did not complete — no mutants.out/outcomes.json" >&2
+        exit 1
+    fi
+
+    actual="$(sed -E 's#:[0-9]+:[0-9]+: #: #' mutants.out/missed.txt 2>/dev/null | sort)"
+    want="$(grep -vE '^[[:space:]]*(#|$)' "$expected" | sort)"
+
+    if [[ "$actual" == "$want" ]]; then
+        echo "✓ surviving mutants match the known-equivalent set ($(grep -c . <<<"$want") of them)"
+        exit 0
+    fi
+
+    echo "✗ the set of surviving mutants changed" >&2
+    diff --label "expected ($expected)" --label "actual (mutants.out/missed.txt)" \
+         -u <(echo "$want") <(echo "$actual") >&2 || true
+    echo >&2
+    echo "  A new survivor is a missing test — write the test." >&2
+    echo "  If you have proved one unkillable, add it to $expected with the proof." >&2
+    exit 1
 
 mutants-all:
     cargo mutants --no-shuffle -j4 --examine-globs 'crates/**/*.rs'

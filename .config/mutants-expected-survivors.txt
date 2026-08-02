@@ -1,0 +1,44 @@
+# Mutants that survive `just mutants` and that no test can kill.
+#
+# Why this file exists: `cargo mutants` exits non-zero whenever any mutant
+# survives. Two survive here by construction, so a CI job demanding zero
+# survivors could never pass — and a gate that is always red is a gate nobody
+# reads. `just mutants-check` judges the run against this list instead. A new
+# survivor fails the build; these do not.
+#
+# The bar for adding an entry is a proof that no test can reach the mutated
+# behaviour. "I could not think of a test" is not a proof — that is an untested
+# branch, and it belongs in the suite rather than in this file. Session 4
+# removed three entries that had been filed as equivalent when they were in
+# fact a real defect (`Currency::minor_units_per_major`), and killed a fourth
+# that was merely hard to reach (`amort::pow_fp`).
+#
+# Format: `<path>: <mutation>` — `mutants.out/missed.txt` with the line and
+# column removed. Line and column move whenever anything above a mutant is
+# edited, so pinning them would make this file fail on unrelated changes. The
+# path is kept because it is stable and distinguishes otherwise-identical
+# descriptions in different files.
+#
+# The two entries below are identical after that normalisation, because they
+# differ only in column. The duplicate is load-bearing: it is what pins the
+# expected count at two rather than "one or more".
+#
+# ---------------------------------------------------------------------------
+# crates/velt-money/src/lib.rs — div_round_half_away
+# ---------------------------------------------------------------------------
+# Both mutate the sign test `if (numer < 0) == (denom < 0)` to use `<=`, and
+# both are unreachable at that point in the function:
+#
+#   numer < 0  ->  numer <= 0   Differs only when numer == 0. If numer is zero
+#                               then rem is zero, and `if rem == 0 { return }`
+#                               has already returned, two statements earlier.
+#
+#   denom < 0  ->  denom <= 0   Differs only when denom == 0, which returns
+#                               MoneyError::DivideByZero on the first line of
+#                               the function.
+#
+# Killing either would need a test that reaches the sign test with a zero
+# operand, which the function's own guards make impossible.
+
+crates/velt-money/src/lib.rs: replace < with <= in div_round_half_away
+crates/velt-money/src/lib.rs: replace < with <= in div_round_half_away

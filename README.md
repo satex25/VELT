@@ -79,6 +79,7 @@ the legacy `gh`-based path kept for machines that have it.
 | `just ci-full` | `ci` plus mutation testing and coverage. Run before a release. |
 | `just test-engine` | Tight loop on the two crates where being wrong is fatal. |
 | `just mutants` | Mutation testing. A surviving mutant is a bug in the *tests*. |
+| `just mutants-check` | The gate form, and what CI runs — compares survivors against the set proven unkillable. |
 | `just deps` | Advisories, licence allow-list, banned crates, unused deps. |
 | `just review` | Interactive insta snapshot review. |
 | `just coverage` | HTML coverage report over the workspace. |

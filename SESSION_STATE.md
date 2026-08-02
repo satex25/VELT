@@ -356,25 +356,33 @@ uploading the directory as a workflow artifact.
   `package.json`, which is also the only value the committed lockfile works
   with. Fixed, but unverified until a run goes green.
 
-  **`mutation testing` cannot pass as written.** `cargo mutants` exits 3 when
+  **`mutation testing` could not pass as written.** `cargo mutants` exits 3 when
   any mutant survives, and two survive by construction — the `numer`/`denom`
   pair with a written proof that no test can kill them. Confirmed locally: exit
-  3 on all three session-4 runs, including the final one. The job is therefore
-  red permanently, which is worse than absent, because a gate that is always
-  red is a gate nobody reads. **Not yet fixed** — it needs a decision about what
-  the gate should assert, and the honest options are to compare against a known
-  survivor set, or to make the job informational and let `just ci-full` be the
-  real check before a release.
+  3 on every session-4 run, including the final one. The job was therefore red
+  permanently, which is worse than absent, because a gate that is always red is
+  a gate nobody reads.
+
+  **Fixed by judging the run against a known survivor set** rather than against
+  zero. `just mutants-check` compares `mutants.out/missed.txt` against
+  `.config/mutants-expected-survivors.txt` and fails when the set changes in
+  either direction: a new survivor is a missing test, and a survivor that
+  disappeared means the expected file is stale. The comparison strips line and
+  column — those move on any edit above a mutant, and pinning them would fail
+  the build on unrelated changes — but keeps the file path, and keeps duplicate
+  entries so the count is pinned rather than merely the shape. Verified against
+  four cases: unchanged, a new survivor, a killed survivor, and a pure line
+  shift. First green run of the gate: exit 0.
 
 ---
 
 ## Next, in order
 
-1. **Get CI green.** It has never passed. The pnpm setup break is fixed but
-   unverified; the mutation job still needs a decision about what it should
-   assert, since two provably-equivalent survivors make `cargo mutants` exit
-   non-zero forever. Until a run is green, no gate has ever been enforced by
-   anything except a human running `just ci` locally.
+1. **Confirm CI is green.** It has never passed. Both causes are now fixed —
+   the pnpm version conflict and the permanently-red mutation job — and
+   `just mutants-check` exits 0 locally, but neither fix has been observed on
+   GitHub. Until a run is green, no gate has ever been enforced by anything
+   except a human running `just ci` locally.
 2. **Persist something.** `velt-store` is implemented, tested, and called by
    nothing; `/underwrite` still forgets its answer the moment it responds. This
    is the biggest gap in the Rust half and the one the outside cannot see.

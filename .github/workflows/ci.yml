@@ -119,8 +119,16 @@ jobs:
         with:
           tool: cargo-mutants,cargo-nextest
 
+      - uses: extractions/setup-just@v3
+
+      # Not bare `cargo mutants`: it exits non-zero whenever any mutant
+      # survives, and two survive with a written proof that no test can kill
+      # them, so this job failed on every run since it was added. `just
+      # mutants-check` compares the survivors against
+      # .config/mutants-expected-survivors.txt and fails only when that set
+      # changes — which is the thing actually worth failing on.
       - name: Mutate velt-engine and velt-money
-        run: cargo mutants --no-shuffle -j2 --in-place
+        run: just mutants-check
 
       - name: Upload mutants report
         if: always()
