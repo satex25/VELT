@@ -148,7 +148,6 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
- "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -1225,7 +1224,6 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 name = "velt-connector"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "serde",
  "thiserror",
  "utoipa",
@@ -1239,17 +1237,14 @@ dependencies = [
  "anyhow",
  "axum",
  "serde",
- "serde_json",
  "tokio",
  "tower-http",
  "tracing",
  "tracing-subscriber",
  "utoipa",
- "velt-connector",
  "velt-engine",
  "velt-money",
  "velt-provenance",
- "velt-store",
 ]
 
 [[package]]
@@ -1290,9 +1285,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "utoipa",
  "uuid",
- "velt-engine",
 ]
 
 [[package]]
