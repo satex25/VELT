@@ -292,7 +292,7 @@ impl Money {
             .checked_mul(i128::from(rate.raw()))
             .ok_or(MoneyError::Overflow { op: "apply" })?;
         let denom = i128::from(Bps::SCALE);
-        let minor = div_round_half_away(numer, denom)?;
+        let minor = div_round_half_away(numer, denom, "apply")?;
         let minor = i64::try_from(minor).map_err(|_| MoneyError::Overflow { op: "apply" })?;
         Ok(Self {
             minor,
@@ -308,7 +308,7 @@ impl Money {
         if n == 0 {
             return Err(MoneyError::DivideByZero { op: "div_int" });
         }
-        let minor = div_round_half_away(i128::from(self.minor), i128::from(n))?;
+        let minor = div_round_half_away(i128::from(self.minor), i128::from(n), "div_int")?;
         let minor = i64::try_from(minor).map_err(|_| MoneyError::Overflow { op: "div_int" })?;
         Ok(Self {
             minor,
@@ -336,7 +336,7 @@ impl Money {
         let numer = i128::from(self.minor)
             .checked_mul(i128::from(Bps::SCALE))
             .ok_or(MoneyError::Overflow { op: "ratio_to" })?;
-        let raw = div_round_half_away(numer, i128::from(base.minor))?;
+        let raw = div_round_half_away(numer, i128::from(base.minor), "ratio_to")?;
         let raw = i64::try_from(raw).map_err(|_| MoneyError::Overflow { op: "ratio_to" })?;
         Ok(Bps::from_raw(raw))
     }
@@ -455,7 +455,7 @@ impl Bps {
         if n == 0 {
             return Err(MoneyError::DivideByZero { op: "Bps::div_int" });
         }
-        let raw = div_round_half_away(i128::from(self.0), i128::from(n))?;
+        let raw = div_round_half_away(i128::from(self.0), i128::from(n), "Bps::div_int")?;
         i64::try_from(raw)
             .map(Self)
             .map_err(|_| MoneyError::Overflow { op: "Bps::div_int" })
@@ -474,34 +474,38 @@ impl fmt::Display for Bps {
 
 /// Integer division rounding half away from zero.
 ///
-/// The one rounding primitive in VELT. Half-away-from-zero is chosen over
-/// banker's rounding because it matches the convention lenders and HUD schedules
-/// use in published figures, so hand-verified fixtures agree to the cent.
-fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {
+/// The one rounding primitive in VELT — this function and no other copy.
+/// Half-away-from-zero is chosen over banker's rounding because it matches the
+/// convention lenders and HUD schedules use in published figures, so
+/// hand-verified fixtures agree to the cent.
+///
+/// Public because `velt-engine`'s fixed-point amortization needs exactly this
+/// rounding and previously carried its own duplicate. Two copies meant a
+/// rounding change was a two-crate edit that could silently diverge, and in
+/// practice one copy was sign-tested and the other was not. Do not reintroduce
+/// a second implementation; call this.
+///
+/// `op` labels the operation in any error, so a caller keeps its own error
+/// vocabulary rather than reporting a generic rounding failure.
+///
+/// # Errors
+/// [`MoneyError::DivideByZero`] if `denom` is zero, or [`MoneyError::Overflow`]
+/// if the correction step leaves `i128` range.
+pub fn div_round_half_away(numer: i128, denom: i128, op: &'static str) -> Result<i128> {
     if denom == 0 {
-        return Err(MoneyError::DivideByZero {
-            op: "div_round_half_away",
-        });
+        return Err(MoneyError::DivideByZero { op });
     }
     // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,
     // and doctrine §5 does not permit a financial path that can panic.
-    let quot = numer.checked_div(denom).ok_or(MoneyError::Overflow {
-        op: "div_round_half_away",
-    })?;
-    let rem = numer.checked_rem(denom).ok_or(MoneyError::Overflow {
-        op: "div_round_half_away",
-    })?;
+    let quot = numer.checked_div(denom).ok_or(MoneyError::Overflow { op })?;
+    let rem = numer.checked_rem(denom).ok_or(MoneyError::Overflow { op })?;
     if rem == 0 {
         return Ok(quot);
     }
-    let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow {
-        op: "div_round_half_away",
-    })?;
+    let twice = rem.checked_mul(2).ok_or(MoneyError::Overflow { op })?;
     if twice.abs() >= denom.abs() {
         let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };
-        quot.checked_add(step).ok_or(MoneyError::Overflow {
-            op: "div_round_half_away",
-        })
+        quot.checked_add(step).ok_or(MoneyError::Overflow { op })
     } else {
         Ok(quot)
     }
@@ -593,10 +597,19 @@ mod tests {
 
     #[test]
     fn div_round_half_away_matches_hand_verified_cases() {
-        assert_eq!(div_round_half_away(5, 2).unwrap(), 3);
-        assert_eq!(div_round_half_away(-5, 2).unwrap(), -3);
-        assert_eq!(div_round_half_away(5, -2).unwrap(), -3);
-        assert_eq!(div_round_half_away(4, 2).unwrap(), 2);
-        assert_eq!(div_round_half_away(1, 3).unwrap(), 0);
+        assert_eq!(div_round_half_away(5, 2, "t").unwrap(), 3);
+        assert_eq!(div_round_half_away(-5, 2, "t").unwrap(), -3);
+        assert_eq!(div_round_half_away(5, -2, "t").unwrap(), -3);
+        assert_eq!(div_round_half_away(-5, -2, "t").unwrap(), 3);
+        assert_eq!(div_round_half_away(4, 2, "t").unwrap(), 2);
+        assert_eq!(div_round_half_away(1, 3, "t").unwrap(), 0);
+    }
+
+    #[test]
+    fn the_op_label_is_carried_into_the_error() {
+        assert_eq!(
+            div_round_half_away(1, 0, "caller_name"),
+            Err(MoneyError::DivideByZero { op: "caller_name" })
+        );
     }
 }

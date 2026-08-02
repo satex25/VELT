@@ -45,32 +45,16 @@ fn pow_fp(base: i128, exp: u32) -> Result<i128> {
     Ok(result)
 }
 
-/// Integer division rounding half away from zero.
+/// Integer division rounding half away from zero, labelled for this module.
+///
+/// Delegates to [`velt_money::div_round_half_away`], which is the single
+/// rounding primitive in VELT (doctrine §5). This module previously carried a
+/// byte-for-byte copy of that logic; two implementations meant a rounding
+/// change was a two-crate edit that could silently diverge, and only one of the
+/// two was ever sign-tested. Keep this a delegation — if rounding needs to
+/// change, change it in `velt-money`.
 fn div_round_half_away(numer: i128, denom: i128) -> Result<i128> {
-    if denom == 0 {
-        return Err(MoneyError::DivideByZero { op: "amort::div" });
-    }
-    // checked_div/checked_rem rather than `/` and `%`: i128::MIN / -1 overflows,
-    // and doctrine §5 does not permit a financial path that can panic.
-    let quot = numer
-        .checked_div(denom)
-        .ok_or(MoneyError::Overflow { op: "amort::div" })?;
-    let rem = numer
-        .checked_rem(denom)
-        .ok_or(MoneyError::Overflow { op: "amort::div" })?;
-    if rem == 0 {
-        return Ok(quot);
-    }
-    let twice = rem
-        .checked_mul(2)
-        .ok_or(MoneyError::Overflow { op: "amort::div" })?;
-    if twice.abs() >= denom.abs() {
-        let step = if (numer < 0) == (denom < 0) { 1 } else { -1 };
-        quot.checked_add(step)
-            .ok_or(MoneyError::Overflow { op: "amort::div" })
-    } else {
-        Ok(quot)
-    }
+    velt_money::div_round_half_away(numer, denom, "amort::div")
 }
 
 /// The periodic (monthly) rate as fixed point, from an annual nominal rate.
@@ -362,9 +346,6 @@ mod tests {
 
     #[test]
     fn rounding_rejects_a_zero_divisor_rather_than_panicking() {
-        assert!(matches!(
-            div_round_half_away(1, 0),
-            Err(MoneyError::DivideByZero { .. })
-        ));
+        assert!(matches!(div_round_half_away(1, 0), Err(MoneyError::DivideByZero { .. })));
     }
 }
